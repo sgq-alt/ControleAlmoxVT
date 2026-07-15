@@ -64,7 +64,8 @@
         const { 
             Settings, Package, Clock, AlertTriangle, CheckCircle, Search, 
             Plus, Edit2, AlertCircle, RefreshCw, LogIn, Lock, Info, 
-            CheckSquare, Square, Trash2, Eye, UserCheck, Wifi, WifiOff 
+            CheckSquare, Square, Trash2, Eye, UserCheck, Wifi, WifiOff,
+            FileText, UploadCloud, X, ExternalLink
         } = window.lucide;
 
         // Configurações do Firebase integradas conforme enviado
@@ -154,10 +155,13 @@
             const [newChecklistName, setNewChecklistName] = useState('');
             const [newChecklistQtd, setNewChecklistQtd] = useState('');
             const [tempChecklist, setTempChecklist] = useState([]);
+            
+            // Estado para gerenciar arquivos PDF e erros de upload de forma amigável (Sem usar alerts)
+            const [pdfError, setPdfError] = useState(null);
 
-            // Estado para o formulário de Nova/Edição OP
+            // Estado para o formulário de Nova/Edição OP (Atualizado com SlaDeadline e Anexo de PDF)
             const [formData, setFormData] = useState({
-                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: []
+                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: [], slaDeadline: '', pdfFile: null
             });
 
             useEffect(() => {
@@ -218,26 +222,41 @@
             });
 
             const handleOpenModal = (op = null) => {
+                setPdfError(null);
                 if (op) {
                     setEditingOp(op);
+                    
+                    // Converte o SLA da OP para o formato datetime-local aceitável pelo HTML (YYYY-MM-DDTHH:mm)
+                    const opDate = op.slaDeadline ? new Date(op.slaDeadline) : new Date();
+                    const localISOString = new Date(opDate.getTime() - opDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
                     setFormData({
                         opNumber: op.opNumber,
                         model: op.model,
                         faccaoDestino: op.faccaoDestino,
                         status: op.status,
                         notes: op.notes || '',
-                        items: op.items || []
+                        items: op.items || [],
+                        slaDeadline: localISOString,
+                        pdfFile: op.pdfFile || null
                     });
                 } else {
                     setEditingOp(null);
                     setTempChecklist([]);
+                    
+                    // Pré-calcula a sugestão padrão de 24 horas a partir de agora ajustada com o fuso local
+                    const defaultDeadline = new Date(new Date().getTime() + (initialSLAHours * 60 * 60 * 1000));
+                    const localISOString = new Date(defaultDeadline.getTime() - defaultDeadline.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
                     setFormData({ 
                         opNumber: '', 
                         model: '', 
                         faccaoDestino: '', 
                         status: 'pendente', 
                         notes: '', 
-                        items: [] 
+                        items: [],
+                        slaDeadline: localISOString,
+                        pdfFile: null
                     });
                 }
                 setIsModalOpen(true);
@@ -247,6 +266,59 @@
                 setIsModalOpen(false);
                 setEditingOp(null);
                 setTempChecklist([]);
+                setPdfError(null);
+            };
+
+            // Processamento do Arquivo PDF da OP de forma reativa e segura
+            const handlePdfUpload = (e) => {
+                const file = e.target.files[0];
+                setPdfError(null);
+                if (!file) return;
+
+                if (file.type !== 'application/pdf') {
+                    setPdfError('Por favor, selecione apenas arquivos no formato PDF.');
+                    return;
+                }
+
+                // Limite técnico de 800KB para evitar estouro da cota gratuita do documento Firestore (1MB)
+                if (file.size > 800 * 1024) {
+                    setPdfError('Este PDF é muito pesado (limite de 800KB para nuvem). Otimize o PDF ou anexe uma versão de página única.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (uploadEvent) => {
+                    setFormData({
+                        ...formData,
+                        pdfFile: {
+                            name: file.name,
+                            size: (file.size / 1024).toFixed(1) + ' KB',
+                            data: uploadEvent.target.result
+                        }
+                    });
+                };
+                reader.onerror = () => {
+                    setPdfError('Erro ao ler o arquivo PDF. Tente novamente.');
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleRemovePdf = () => {
+                setFormData({ ...formData, pdfFile: null });
+                setPdfError(null);
+            };
+
+            const handleViewPdf = () => {
+                if (!formData.pdfFile || !formData.pdfFile.data) return;
+                try {
+                    const pdfWindow = window.open();
+                    pdfWindow.document.write(
+                        `<iframe src="${formData.pdfFile.data}" style="border:0; position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`
+                    );
+                    pdfWindow.document.title = `Visualizador de OP - ${formData.opNumber || 'PDF'}`;
+                } catch (err) {
+                    setPdfError('Bloqueador de pop-ups ativado. Por favor, permita aberturas de nova guia para visualizar o PDF.');
+                }
             };
 
             const addChecklistItem = () => {
@@ -310,13 +382,15 @@
                     try {
                         await db.collection("solicitacoes").doc(editingOp.id).update(updatedData);
                     } catch (error) {
-                        alert("Erro ao salvar alterações no banco: " + error.message);
+                        setPdfError("Erro ao salvar alterações no banco: " + error.message);
                     }
                 } else {
                     // Regra: Apenas o PCP pode abrir novas solicitações de OP
                     if (userRole !== 'pcp') return;
 
-                    const deadline = new Date(now.getTime() + (initialSLAHours * 60 * 60 * 1000));
+                    // Converte a data selecionada no formulário de volta para o formato de String ISO global antes de enviar ao Firestore
+                    const selectedDeadlineISO = formData.slaDeadline ? new Date(formData.slaDeadline).toISOString() : new Date(now.getTime() + (initialSLAHours * 60 * 60 * 1000)).toISOString();
+
                     const newOp = {
                         opNumber: formData.opNumber,
                         model: formData.model,
@@ -324,15 +398,16 @@
                         status: 'pendente',
                         notes: '',
                         requestTime: now.toISOString(),
-                        slaDeadline: deadline.toISOString(),
+                        slaDeadline: selectedDeadlineISO,
                         completedTime: null,
-                        items: tempChecklist
+                        items: tempChecklist,
+                        pdfFile: formData.pdfFile || null
                     };
 
                     try {
                         await db.collection("solicitacoes").add(newOp);
                     } catch (error) {
-                        alert("Erro ao criar OP no banco: " + error.message);
+                        setPdfError("Erro ao criar OP no banco: " + error.message);
                     }
                 }
                 handleCloseModal();
@@ -375,7 +450,14 @@
                         <div className={`absolute left-0 top-0 bottom-0 w-1 ${sla.status === 'late' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
                         
                         <div className="flex justify-between items-start mb-2 pl-1">
-                            <h4 className="font-bold text-slate-800">{op.opNumber}</h4>
+                            <h4 className="font-bold text-slate-800 flex items-center gap-1">
+                                {op.opNumber}
+                                {op.pdfFile && (
+                                    <span title="Ficha Técnica / PDF Anexo">
+                                        <i data-lucide="file-text" className="w-3.5 h-3.5 text-blue-500"></i>
+                                    </span>
+                                )}
+                            </h4>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${sla.status === 'late' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${sla.status === 'late' ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
                                 {sla.text}
@@ -394,7 +476,7 @@
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <i data-lucide="alert-circle" className="w-3 h-3 text-slate-400"></i>
-                                <span>Prazo: {formatDateTime(op.slaDeadline)}</span>
+                                <span className={sla.status === 'late' ? 'text-rose-600 font-semibold' : ''}>Prazo: {formatDateTime(op.slaDeadline)}</span>
                             </div>
                         </div>
 
@@ -404,14 +486,22 @@
                             </div>
                         )}
                         
-                        {op.items && op.items.length > 0 && (
-                            <div className="mt-2 text-[11px] text-slate-500 flex justify-between items-center bg-slate-100/50 px-2 py-1 rounded">
-                                <span className="font-medium">Checklist Separado:</span>
-                                <span className="font-bold text-slate-700">
-                                    {op.items.filter(i => i.checked).length}/{op.items.length} itens
+                        <div className="mt-2 flex justify-between items-center bg-slate-100/50 px-2 py-1 rounded text-[11px] text-slate-500">
+                            {op.pdfFile ? (
+                                <span className="flex items-center gap-1 text-blue-600 font-medium">
+                                    <i data-lucide="file-text" className="w-3 h-3"></i> PDF da OP Anexo
                                 </span>
-                            </div>
-                        )}
+                            ) : (
+                                <span className="text-slate-400">Sem PDF</span>
+                            )}
+                            {op.items && op.items.length > 0 ? (
+                                <span className="font-bold text-slate-700">
+                                    {op.items.filter(i => i.checked).length}/{op.items.length} checklist
+                                </span>
+                            ) : (
+                                <span className="text-slate-400">Sem checklist</span>
+                            )}
+                        </div>
                     </div>
                 );
             };
@@ -495,7 +585,6 @@
                             </div>
                         </div>
 
-                        {}
                         <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
                             <div className="flex gap-4 h-full items-start min-w-max">
                                 
@@ -526,7 +615,6 @@
                         </div>
                     </main>
 
-                    {}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-950/40 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -566,21 +654,109 @@
                                             </div>
                                         </div>
 
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1">Destino (Facção / Oficina Terceira) *</label>
-                                            <input 
-                                                type="text" required placeholder="Ex: Oficina Confecção Silva"
-                                                className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500"
-                                                value={formData.faccaoDestino} 
-                                                onChange={e => setFormData({...formData, faccaoDestino: e.target.value})}
-                                                disabled={!!editingOp || userRole !== 'pcp'}
-                                            />
+                                        {/* Destino e SLA customizável lado a lado para PCP */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Destino (Facção / Oficina Terceira) *</label>
+                                                <input 
+                                                    type="text" required placeholder="Ex: Oficina Confecção Silva"
+                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                                                    value={formData.faccaoDestino} 
+                                                    onChange={e => setFormData({...formData, faccaoDestino: e.target.value})}
+                                                    disabled={!!editingOp || userRole !== 'pcp'}
+                                                />
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Prazo de Entrega (SLA) *</label>
+                                                <input 
+                                                    type="datetime-local" required
+                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500 font-medium"
+                                                    value={formData.slaDeadline} 
+                                                    onChange={e => setFormData({...formData, slaDeadline: e.target.value})}
+                                                    disabled={!!editingOp || userRole !== 'pcp'}
+                                                />
+                                            </div>
                                         </div>
 
-                                        {}
+                                        {/* GESTÃO DE ANEXO DE PDF - EXCLUSIVO PCP NA CRIAÇÃO OU VISUALIZAÇÃO GERAL */}
+                                        <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
+                                            <h3 className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+                                                <span>Ficha Técnica / PDF da OP</span>
+                                                <span className="text-[10px] text-slate-400">Opcional (Máx: 800KB)</span>
+                                            </h3>
+
+                                            {/* Erro de Arquivo (Amigável, sem alert) */}
+                                            {pdfError && (
+                                                <div className="mb-3 p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 flex items-center gap-1.5">
+                                                    <i data-lucide="alert-circle" className="w-4 h-4 flex-shrink-0"></i>
+                                                    <span>{pdfError}</span>
+                                                </div>
+                                            )}
+
+                                            {/* Renderização condicional: Upload (Para PCP) ou Visualização (Para Almoxarifado / PCP) */}
+                                            {!formData.pdfFile ? (
+                                                userRole === 'pcp' ? (
+                                                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-400 transition-colors bg-white cursor-pointer relative">
+                                                        <input 
+                                                            type="file" 
+                                                            accept=".pdf"
+                                                            onChange={handlePdfUpload}
+                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                        />
+                                                        <div className="flex flex-col items-center justify-center gap-1.5">
+                                                            <div className="p-2 bg-blue-50 rounded-full text-blue-500">
+                                                                <i data-lucide="upload-cloud" className="w-5 h-5"></i>
+                                                            </div>
+                                                            <span className="text-xs font-semibold text-slate-700">Clique para anexar o PDF da OP</span>
+                                                            <span className="text-[10px] text-slate-400">Formatos aceitos: apenas arquivos .pdf</span>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="p-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 bg-white rounded-xl">
+                                                        Nenhum documento PDF foi anexado a esta solicitação.
+                                                    </div>
+                                                )
+                                            ) : (
+                                                <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
+                                                            <i data-lucide="file-text" className="w-5 h-5"></i>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="text-xs font-semibold text-slate-800 truncate" title={formData.pdfFile.name}>
+                                                                {formData.pdfFile.name}
+                                                            </p>
+                                                            <p className="text-[10px] text-slate-400">{formData.pdfFile.size}</p>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={handleViewPdf}
+                                                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
+                                                        >
+                                                            <i data-lucide="external-link" className="w-3.5 h-3.5"></i>
+                                                            Visualizar
+                                                        </button>
+                                                        {userRole === 'pcp' && !editingOp && (
+                                                            <button 
+                                                                type="button" 
+                                                                onClick={handleRemovePdf}
+                                                                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                                                            >
+                                                                <i data-lucide="x" className="w-4 h-4"></i>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
                                             <h3 className="text-xs font-bold text-slate-700 mb-3 flex items-center justify-between">
-                                                <span>Checklist de Aviamentos Requisitados</span>
+                                                <span>Checklist Opcional de Aviamentos Requisitados</span>
                                                 {userRole === 'pcp' && <span className="text-[10px] text-blue-600 font-medium">Apenas PCP cadastra</span>}
                                                 {userRole === 'almoxarifado' && <span className="text-[10px] text-emerald-600 font-medium">Almoxarifado: Clique para dar baixa</span>}
                                             </h3>
@@ -689,7 +865,7 @@
                                         {!editingOp && (
                                             <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-xs text-blue-800 flex items-start gap-2">
                                                 <i data-lucide="info" className="w-4 h-4 flex-shrink-0 mt-0.5"></i>
-                                                <p>Após salvar, este registro é lançado em tempo real na nuvem do Almoxarifado com status <strong>Pendente</strong> e contagem regressiva de SLA.</p>
+                                                <p>Após salvar, este registro é lançado em tempo real na nuvem do Almoxarifado com o status <strong>Pendente</strong> e contagem regressiva baseada no Prazo Limite configurado.</p>
                                             </div>
                                         )}
                                     </form>
