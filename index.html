@@ -53,30 +53,43 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
-        // Variáveis de ambiente fornecidas pela plataforma
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDE5W2dSh9bdsds_E8_5Cvrr0KE2IOlzpI",
+  authDomain: "almoxvt.firebaseapp.com",
+  projectId: "almoxvt",
+  storageBucket: "almoxvt.firebasestorage.app",
+  messagingSenderId: "688995393151",
+  appId: "1:688995393151:web:55ef061e6641f376b7294a",
+  measurementId: "G-CJRY2BQWRH"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+        const firebaseConfig = {
+            apiKey: "SUA_API_KEY_AQUI",
+            authDomain: "SEU_PROJETO.firebaseapp.com",
+            projectId: "SEU_PROJETO_ID_AQUI",
+            storageBucket: "SEU_PROJETO.appspot.com",
+            messagingSenderId: "SEU_SENDER_ID_AQUI",
+            appId: "SEU_APP_ID_AQUI"
+        };
+        // ==========================================
+
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'app-aviamentos-flow-v1';
-        
-        let firebaseConfig;
         let isConfigured = false;
 
-        try {
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                firebaseConfig = JSON.parse(__firebase_config);
-                isConfigured = true;
-            } else {
-                // Configuração fallback para testes locais no GitHub Pages ou máquina local
-                firebaseConfig = {
-                    apiKey: "AIzaSyFakePlaceholderKey-ForLocalRunningOnly",
-                    authDomain: "app-aviamentos.firebaseapp.com",
-                    projectId: "app-aviamentos",
-                    storageBucket: "app-aviamentos.appspot.com",
-                    messagingSenderId: "000000000000",
-                    appId: "1:00000000:web:00000000"
-                };
-            }
-        } catch (e) {
-            console.warn("Erro ao ler configuração do Firebase. Iniciando em modo offline simulado.", e);
+        // Valida se o usuário substituiu os placeholders pelas credenciais reais
+        if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "SUA_API_KEY_AQUI") {
+            isConfigured = true;
         }
 
         let app, db, auth;
@@ -88,9 +101,12 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
                 databaseOnline = true;
+                console.log("Conexão com Firebase configurada e ativa com sucesso!");
             } catch (err) {
                 console.error("Falha ao inicializar o Firebase.", err);
             }
+        } else {
+            console.warn("Utilizando dados mockados. Insira suas credenciais do Firebase no index.html.");
         }
 
         // Expondo a API do Firebase de forma segura para o script do React utilizar
