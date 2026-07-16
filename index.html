@@ -21,7 +21,7 @@
     <!-- Google Font Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- SDKs do Firebase (Versão Compat para facilidade em arquivos únicos) -->
+    <!-- SDKs do Firebase (Versão Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -39,7 +39,6 @@
             backdrop-filter: blur(10px);
             border-bottom: 1px solid rgba(0, 0, 0, 0.05);
         }
-        /* Custom scrollbar para deixar a interface limpa */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
             height: 6px;
@@ -65,10 +64,10 @@
             Settings, Package, Clock, AlertTriangle, CheckCircle, Search, 
             Plus, Edit2, AlertCircle, RefreshCw, LogIn, Lock, Info, 
             CheckSquare, Square, Trash2, Eye, UserCheck, Wifi, WifiOff,
-            FileText, UploadCloud, X, ExternalLink
+            FileText, UploadCloud, X, ExternalLink, Save, BookOpen
         } = window.lucide;
 
-        // Configurações do Firebase integradas conforme enviado
+        // Credenciais do seu Firebase integradas
         const firebaseConfig = {
             apiKey: "AIzaSyDE5W2dSh9bdsds_E8_5Cvrr0KE2IOlzpI",
             authDomain: "almoxvt.firebaseapp.com",
@@ -86,10 +85,8 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
 
-        // Configuração de SLA padrão do processo (24 horas úteis)
         const initialSLAHours = 24; 
 
-        // Lista suspensa padronizada para os status da OP
         const statusOptions = [
             { id: 'pendente', label: 'Pendente', color: 'bg-slate-100 text-slate-800 border-slate-300' },
             { id: 'em_separacao', label: 'Em Separação', color: 'bg-blue-100 text-blue-800 border-blue-300' },
@@ -99,7 +96,7 @@
             { id: 'completo', label: 'Kit Completo Separado', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
         ];
 
-        // Dados de amostragem inicial caso o banco de dados esteja vazio
+        // Dados de amostragem inicial para o modo offline ou banco novo
         const initialOpmData = [
             {
                 id: 'exemplo-001',
@@ -119,7 +116,6 @@
             }
         ];
 
-        // Formatação de data/hora no padrão fabril brasileiro
         const formatDateTime = (dateString) => {
             if (!dateString) return '--';
             const date = new Date(dateString);
@@ -146,29 +142,43 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingOp, setEditingOp] = useState(null);
-            const [userRole, setUserRole] = useState('pcp'); // Controle de Governança: 'pcp' ou 'almoxarifado'
-            const [dbStatus, setDbStatus] = useState('conectando'); // 'conectando', 'online', 'error'
+            const [userRole, setUserRole] = useState('pcp'); 
+            const [dbStatus, setDbStatus] = useState('conectando'); // 'conectando', 'online', 'offline'
             const [authError, setAuthError] = useState(null);
-            const [isAuthenticated, setIsAuthenticated] = useState(false); // Trava contra condição de corrida de permissões
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [permissionDeniedError, setPermissionDeniedError] = useState(false);
 
-            // Estados adicionais para checklist dinâmico no modal de criação
+            // Estados adicionais para checklist dinâmico
             const [newChecklistName, setNewChecklistName] = useState('');
             const [newChecklistQtd, setNewChecklistQtd] = useState('');
             const [tempChecklist, setTempChecklist] = useState([]);
-            
-            // Estado para gerenciar arquivos PDF e erros de upload de forma amigável (Sem usar alerts)
             const [pdfError, setPdfError] = useState(null);
 
-            // Estado para o formulário de Nova/Edição OP (Atualizado com SlaDeadline e Anexo de PDF)
+            // Estado para o formulário de Nova/Edição OP
             const [formData, setFormData] = useState({
                 opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: [], slaDeadline: '', pdfFile: null
             });
 
+            // Sincronizador de contingência LocalStorage
+            const loadLocalData = () => {
+                const localData = localStorage.getItem('solicitacoes_local');
+                if (localData) {
+                    setOps(JSON.parse(localData));
+                } else {
+                    localStorage.setItem('solicitacoes_local', JSON.stringify(initialOpmData));
+                    setOps(initialOpmData);
+                }
+            };
+
+            const saveLocalData = (updatedOps) => {
+                setOps(updatedOps);
+                localStorage.setItem('solicitacoes_local', JSON.stringify(updatedOps));
+            };
+
             useEffect(() => {
-                // Monitora o estado de autenticação de forma síncrona com o ciclo de vida do componente
+                // Autenticação robusta em segundo plano
                 const unsubscribeAuth = auth.onAuthStateChanged((user) => {
                     if (user) {
-                        console.log("Autenticado anonimamente com sucesso!");
                         setIsAuthenticated(true);
                         setAuthError(null);
                     } else {
@@ -177,7 +187,8 @@
                             .catch((error) => {
                                 console.error("Erro ao autenticar no modo produção:", error);
                                 setAuthError(error.message);
-                                setDbStatus('error');
+                                setDbStatus('offline');
+                                loadLocalData();
                             });
                     }
                 });
@@ -185,10 +196,11 @@
             }, []);
 
             useEffect(() => {
-                // SALVAGUARDA: Só inicia a escuta das coleções após o usuário estar formalmente autenticado
                 if (!isAuthenticated) return;
 
                 setDbStatus('conectando');
+                setPermissionDeniedError(false);
+
                 const unsubscribe = db.collection("solicitacoes")
                     .orderBy("requestTime", "desc")
                     .onSnapshot((snapshot) => {
@@ -197,24 +209,38 @@
                             items.push({ id: doc.id, ...doc.data() });
                         });
 
-                        // Se o banco estiver zerado no primeiro acesso, adiciona o exemplo
                         if (items.length === 0) {
+                            // Popula o banco novo se estiver totalmente vazio
                             initialOpmData.forEach(async (op) => {
-                                await db.collection("solicitacoes").doc(op.id).set(op);
+                                try {
+                                    await db.collection("solicitacoes").doc(op.id).set(op);
+                                } catch (e) {
+                                    console.error("Erro ao popular banco inicial:", e);
+                                }
                             });
+                            setOps(initialOpmData);
                         } else {
                             setOps(items);
+                            // Sincroniza o local com os dados atualizados da nuvem
+                            localStorage.setItem('solicitacoes_local', JSON.stringify(items));
                         }
                         setDbStatus('online');
                     }, (error) => {
-                        console.error("Erro no canal Firestore:", error);
-                        setDbStatus('error');
+                        console.error("Erro no canal Firestore controlado:", error);
+                        
+                        // Captura especificamente o erro de regras de segurança insuficientes
+                        if (error.message.includes("permissions") || error.code === "permission-denied") {
+                            setPermissionDeniedError(true);
+                        }
+                        
+                        setDbStatus('offline');
+                        loadLocalData(); // Sobe imediatamente os dados locais para a aplicação não parar!
                     });
 
                 return () => unsubscribe();
             }, [isAuthenticated]);
 
-            // Atualiza os ícones do Lucide sempre que a árvore renderizar
+            // Atualiza os ícones do Lucide sempre que renderizar
             useEffect(() => {
                 if (window.lucide) {
                     window.lucide.createIcons();
@@ -226,7 +252,6 @@
                 if (op) {
                     setEditingOp(op);
                     
-                    // Converte o SLA da OP para o formato datetime-local aceitável pelo HTML (YYYY-MM-DDTHH:mm)
                     const opDate = op.slaDeadline ? new Date(op.slaDeadline) : new Date();
                     const localISOString = new Date(opDate.getTime() - opDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
@@ -244,19 +269,12 @@
                     setEditingOp(null);
                     setTempChecklist([]);
                     
-                    // Pré-calcula a sugestão padrão de 24 horas a partir de agora ajustada com o fuso local
                     const defaultDeadline = new Date(new Date().getTime() + (initialSLAHours * 60 * 60 * 1000));
                     const localISOString = new Date(defaultDeadline.getTime() - defaultDeadline.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
                     setFormData({ 
-                        opNumber: '', 
-                        model: '', 
-                        faccaoDestino: '', 
-                        status: 'pendente', 
-                        notes: '', 
-                        items: [],
-                        slaDeadline: localISOString,
-                        pdfFile: null
+                        opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: [],
+                        slaDeadline: localISOString, pdfFile: null
                     });
                 }
                 setIsModalOpen(true);
@@ -269,7 +287,6 @@
                 setPdfError(null);
             };
 
-            // Processamento do Arquivo PDF da OP de forma reativa e segura
             const handlePdfUpload = (e) => {
                 const file = e.target.files[0];
                 setPdfError(null);
@@ -280,9 +297,8 @@
                     return;
                 }
 
-                // Limite técnico de 800KB para evitar estouro da cota gratuita do documento Firestore (1MB)
                 if (file.size > 800 * 1024) {
-                    setPdfError('Este PDF é muito pesado (limite de 800KB para nuvem). Otimize o PDF ou anexe uma versão de página única.');
+                    setPdfError('Este PDF ultrapassa o limite de 800KB para armazenamento em nuvem.');
                     return;
                 }
 
@@ -315,9 +331,9 @@
                     pdfWindow.document.write(
                         `<iframe src="${formData.pdfFile.data}" style="border:0; position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`
                     );
-                    pdfWindow.document.title = `Visualizador de OP - ${formData.opNumber || 'PDF'}`;
+                    pdfWindow.document.title = `Ficha Técnica OP - ${formData.opNumber}`;
                 } catch (err) {
-                    setPdfError('Bloqueador de pop-ups ativado. Por favor, permita aberturas de nova guia para visualizar o PDF.');
+                    setPdfError('Bloqueador de pop-ups ativado. Por favor, libere a abertura de abas.');
                 }
             };
 
@@ -329,11 +345,9 @@
                     checked: false
                 };
                 if (editingOp) {
-                    // Atualiza em tempo real se estiver editando uma existente
                     const updatedItems = [...formData.items, newItem];
                     setFormData({ ...formData, items: updatedItems });
                 } else {
-                    // Guarda na fila temporária se for nova OP
                     setTempChecklist([...tempChecklist, newItem]);
                 }
                 setNewChecklistName('');
@@ -350,7 +364,7 @@
             };
 
             const toggleItemChecked = async (index) => {
-                if (userRole !== 'almoxarifado') return; // Bloqueio de Governança
+                if (userRole !== 'almoxarifado') return;
                 const updatedItems = formData.items.map((item, i) => 
                     i === index ? { ...item, checked: !item.checked } : item
                 );
@@ -362,7 +376,6 @@
                 const now = new Date();
                 
                 if (editingOp) {
-                    // Regra: Apenas o Almoxarifado altera o status físico das OPs
                     if (userRole !== 'almoxarifado') return;
 
                     let compTime = editingOp.completedTime;
@@ -379,19 +392,27 @@
                         completedTime: compTime
                     };
 
-                    try {
-                        await db.collection("solicitacoes").doc(editingOp.id).update(updatedData);
-                    } catch (error) {
-                        setPdfError("Erro ao salvar alterações no banco: " + error.message);
+                    // Verifica se o banco real está acessível
+                    if (dbStatus === 'online' && !permissionDeniedError) {
+                        try {
+                            await db.collection("solicitacoes").doc(editingOp.id).update(updatedData);
+                        } catch (error) {
+                            console.warn("Falha ao salvar em nuvem. Gravando local...", error);
+                            const updatedLocal = ops.map(op => op.id === editingOp.id ? { ...op, ...updatedData } : op);
+                            saveLocalData(updatedLocal);
+                        }
+                    } else {
+                        // Salva diretamente local se a nuvem estiver bloqueada/offline
+                        const updatedLocal = ops.map(op => op.id === editingOp.id ? { ...op, ...updatedData } : op);
+                        saveLocalData(updatedLocal);
                     }
                 } else {
-                    // Regra: Apenas o PCP pode abrir novas solicitações de OP
                     if (userRole !== 'pcp') return;
 
-                    // Converte a data selecionada no formulário de volta para o formato de String ISO global antes de enviar ao Firestore
                     const selectedDeadlineISO = formData.slaDeadline ? new Date(formData.slaDeadline).toISOString() : new Date(now.getTime() + (initialSLAHours * 60 * 60 * 1000)).toISOString();
 
                     const newOp = {
+                        id: `op-local-${Date.now()}`,
                         opNumber: formData.opNumber,
                         model: formData.model,
                         faccaoDestino: formData.faccaoDestino,
@@ -404,10 +425,16 @@
                         pdfFile: formData.pdfFile || null
                     };
 
-                    try {
-                        await db.collection("solicitacoes").add(newOp);
-                    } catch (error) {
-                        setPdfError("Erro ao criar OP no banco: " + error.message);
+                    if (dbStatus === 'online' && !permissionDeniedError) {
+                        try {
+                            // Salva no banco com o mesmo ID para evitar duplicações
+                            await db.collection("solicitacoes").doc(newOp.id).set(newOp);
+                        } catch (error) {
+                            console.warn("Falha ao criar em nuvem. Gravando local...", error);
+                            saveLocalData([newOp, ...ops]);
+                        }
+                    } else {
+                        saveLocalData([newOp, ...ops]);
                     }
                 }
                 handleCloseModal();
@@ -423,14 +450,12 @@
 
             const visibleOps = ops.filter(op => !isCompletedAndOld(op));
 
-            // Filtro dinâmico da busca textual
             const filteredOps = visibleOps.filter(op => 
-                op.opNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                op.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                op.faccaoDestino.toLowerCase().includes(searchTerm.toLowerCase())
+                (op.opNumber && op.opNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (op.model && op.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (op.faccaoDestino && op.faccaoDestino.toLowerCase().includes(searchTerm.toLowerCase()))
             );
 
-            // Geração de Indicadores Industriais (KPIs) baseados no painel ativo
             const totalOps = visibleOps.length;
             const completedOps = visibleOps.filter(op => op.status === 'completo').length;
             const pendingOps = totalOps - completedOps;
@@ -446,7 +471,6 @@
                         className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-3 hover:shadow-md transition-shadow cursor-pointer relative overflow-hidden" 
                         onClick={() => handleOpenModal(op)}
                     >
-                        {/* Linha colorida do lado indicando o farol de SLA */}
                         <div className={`absolute left-0 top-0 bottom-0 w-1 ${sla.status === 'late' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
                         
                         <div className="flex justify-between items-start mb-2 pl-1">
@@ -508,6 +532,36 @@
 
             return (
                 <div className="min-h-screen flex flex-col">
+                    {/* Alerta inteligente de permissão de segurança do Firebase */}
+                    {permissionDeniedError && (
+                        <div className="bg-amber-50 border-b border-amber-200 p-4">
+                            <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-2 bg-amber-100 rounded-lg text-amber-800">
+                                        <i data-lucide="alert-triangle" className="w-5 h-5"></i>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-amber-900">Banco de Dados em Produção Bloqueado (Permissão Negada)</h3>
+                                        <p className="text-xs text-amber-700 mt-0.5">
+                                            O Firebase rejeitou o carregamento devido às regras de segurança. 
+                                            O aplicativo ativou o <strong>Modo Local de Contingência</strong> automaticamente: você pode usar a tela normalmente!
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <a 
+                                        href="https://console.firebase.google.com/" 
+                                        target="_blank" 
+                                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm"
+                                    >
+                                        <i data-lucide="external-link" className="w-3.5 h-3.5"></i>
+                                        Ajustar Regras no Firebase
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Header Premium com Perfis de Governança */}
                     <header className="glass-header sticky top-0 z-40 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
                         <div className="flex items-center gap-3">
@@ -551,7 +605,6 @@
                                 />
                             </div>
                             
-                            {/* Gatilho exclusivo do PCP */}
                             {userRole === 'pcp' && (
                                 <button 
                                     onClick={() => handleOpenModal()}
@@ -565,7 +618,7 @@
                     {/* Conteúdo Principal do Painel */}
                     <main className="flex-1 p-6 flex flex-col gap-6">
                         
-                        {/* Blocos de Indicadores Industriais (KPIs) */}
+                        {/* Indicadores KPIs */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 rounded-xl text-blue-600"><i data-lucide="file-text" className="w-5 h-5"></i></div>
@@ -585,6 +638,7 @@
                             </div>
                         </div>
 
+                        {/* Kanban */}
                         <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
                             <div className="flex gap-4 h-full items-start min-w-max">
                                 
@@ -615,6 +669,7 @@
                         </div>
                     </main>
 
+                    {/* Modal de Detalhes da OP */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-950/40 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -630,7 +685,6 @@
                                 
                                 <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-5">
                                     <form id="opForm" onSubmit={handleSaveOp} className="space-y-4">
-                                        {/* Informações Básicas (Sempre editáveis apenas na criação pelo PCP) */}
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs font-semibold text-slate-600 mb-1">Número da OP *</label>
@@ -654,7 +708,6 @@
                                             </div>
                                         </div>
 
-                                        {/* Destino e SLA customizável lado a lado para PCP */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs font-semibold text-slate-600 mb-1">Destino (Facção / Oficina Terceira) *</label>
@@ -679,14 +732,13 @@
                                             </div>
                                         </div>
 
-                                        {/* GESTÃO DE ANEXO DE PDF - EXCLUSIVO PCP NA CRIAÇÃO OU VISUALIZAÇÃO GERAL */}
+                                        {/* Anexo de PDF */}
                                         <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
                                             <h3 className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
                                                 <span>Ficha Técnica / PDF da OP</span>
                                                 <span className="text-[10px] text-slate-400">Opcional (Máx: 800KB)</span>
                                             </h3>
 
-                                            {/* Erro de Arquivo (Amigável, sem alert) */}
                                             {pdfError && (
                                                 <div className="mb-3 p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 flex items-center gap-1.5">
                                                     <i data-lucide="alert-circle" className="w-4 h-4 flex-shrink-0"></i>
@@ -694,7 +746,6 @@
                                                 </div>
                                             )}
 
-                                            {/* Renderização condicional: Upload (Para PCP) ou Visualização (Para Almoxarifado / PCP) */}
                                             {!formData.pdfFile ? (
                                                 userRole === 'pcp' ? (
                                                     <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-400 transition-colors bg-white cursor-pointer relative">
@@ -714,7 +765,7 @@
                                                     </div>
                                                 ) : (
                                                     <div className="p-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 bg-white rounded-xl">
-                                                        Nenhum documento PDF foi anexado a esta solicitação.
+                                                        Nenhum documento PDF anexado.
                                                     </div>
                                                 )
                                             ) : (
@@ -754,6 +805,7 @@
                                             )}
                                         </div>
 
+                                        {/* Checklist */}
                                         <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
                                             <h3 className="text-xs font-bold text-slate-700 mb-3 flex items-center justify-between">
                                                 <span>Checklist Opcional de Aviamentos Requisitados</span>
@@ -761,7 +813,6 @@
                                                 {userRole === 'almoxarifado' && <span className="text-[10px] text-emerald-600 font-medium">Almoxarifado: Clique para dar baixa</span>}
                                             </h3>
 
-                                            {/* Formulário de novos itens (Apenas Visível/Habilitado para PCP na criação ou edição) */}
                                             {userRole === 'pcp' && (
                                                 <div className="flex gap-2 mb-3">
                                                     <input 
@@ -785,7 +836,6 @@
                                                 </div>
                                             )}
 
-                                            {/* Lista de Itens do Checklist */}
                                             <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
                                                 {((editingOp ? formData.items : tempChecklist) || []).map((item, index) => (
                                                     <div 
@@ -822,12 +872,12 @@
                                                 ))}
 
                                                 {((editingOp ? formData.items : tempChecklist) || []).length === 0 && (
-                                                    <p className="text-center text-slate-400 text-xs py-4">Nenhum aviamento adicionado ao checklist</p>
+                                                    <p className="text-center text-slate-400 text-xs py-4">Nenhum aviamento no checklist.</p>
                                                 )}
                                             </div>
                                         </div>
 
-                                        {/* Bloco de Atuação Exclusiva do Almoxarifado */}
+                                        {/* Tratativa de Retorno (Almoxarifado) */}
                                         {editingOp && (
                                             <div className="p-4 bg-slate-100 border border-slate-200 rounded-2xl space-y-3">
                                                 <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -849,7 +899,7 @@
                                                         </select>
                                                     </div>
                                                     <div>
-                                                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Observações do Almoxarife (ex: "Falta zíper cor 12", "Em compra")</label>
+                                                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Observações do Almoxarife</label>
                                                         <textarea 
                                                             rows="2" placeholder="Descreva os motivos de retenção..."
                                                             className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
@@ -861,20 +911,12 @@
                                                 </div>
                                             </div>
                                         )}
-
-                                        {!editingOp && (
-                                            <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-xs text-blue-800 flex items-start gap-2">
-                                                <i data-lucide="info" className="w-4 h-4 flex-shrink-0 mt-0.5"></i>
-                                                <p>Após salvar, este registro é lançado em tempo real na nuvem do Almoxarifado com o status <strong>Pendente</strong> e contagem regressiva baseada no Prazo Limite configurado.</p>
-                                            </div>
-                                        )}
                                     </form>
                                 </div>
                                 
                                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-2xl">
                                     <button type="button" onClick={handleCloseModal} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold transition-all">Cancelar</button>
                                     
-                                    {/* Botão Salvar Dinâmico conforme regras de permissão */}
                                     {((userRole === 'pcp' && !editingOp) || (userRole === 'almoxarifado' && editingOp)) && (
                                         <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-semibold shadow-sm transition-all flex items-center gap-2 shadow-blue-100">
                                             <i data-lucide="save" className="w-4 h-4"></i> Gravar Alterações
@@ -885,7 +927,7 @@
                         </div>
                     )}
 
-                    {/* Rodapé Dinâmico: Diagnóstico de Conexão Firebase */}
+                    {/* Rodapé Diagnóstico */}
                     <footer className="bg-slate-900 text-slate-400 py-3 px-6 text-xs flex justify-between items-center border-t border-slate-800">
                         <span>Fluxo de Aviamentos por OP &copy; 2026</span>
                         <div className="flex items-center gap-2">
@@ -895,16 +937,16 @@
                                     Autenticando...
                                 </span>
                             )}
-                            {dbStatus === 'online' && (
+                            {dbStatus === 'online' && !permissionDeniedError && (
                                 <span className="flex items-center gap-1.5 text-emerald-400">
                                     <span className="w-2 h-2 rounded-full bg-emerald-500" />
                                     Nuvem Conectada
                                 </span>
                             )}
-                            {dbStatus === 'error' && (
-                                <span className="flex items-center gap-1.5 text-rose-400" title={authError}>
-                                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                                    Erro no Banco
+                            {(dbStatus === 'offline' || permissionDeniedError) && (
+                                <span className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Utilizando dados locais (localStorage)">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                    Contingência Local Ativa
                                 </span>
                             )}
                         </div>
