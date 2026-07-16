@@ -5,46 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Aviamentos por OP</title>
     
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS para Estilização Premium -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- React & ReactDOM -->
+    <!-- React & ReactDOM (Ambiente de Produção Estável) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     
-    <!-- Babel para tradução inline do JSX -->
+    <!-- Babel para Transpilação do JSX no Navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Lucide Icons para interface profissional -->
+    <!-- SDKs do Firebase v9 em Modo de Compatibilidade (Essencial para rodar em arquivo único) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <!-- Lucide Icons para Iconografia Moderna -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Google Font Inter -->
+    <!-- Fonte Inter (Padrão Industrial de Leitura de Tela) -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- SDKs do Firebase (Versão Compat) -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-
     <style>
         body { 
             font-family: 'Inter', sans-serif; 
             background-color: #f8fafc; 
-        }
-        .kanban-col { 
-            min-height: calc(100vh - 280px); 
-        }
-        .glass-header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
         }
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
             height: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
+            background: #f1f5f9;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
             background: #cbd5e1;
@@ -53,21 +45,23 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.5; }
+            100% { transform: scale(0.95); opacity: 1; }
+        }
+        .pulse-priority {
+            animation: pulse-ring 2s infinite ease-in-out;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
-        const { 
-            Settings, Package, Clock, AlertTriangle, CheckCircle, Search, 
-            Plus, Edit2, AlertCircle, RefreshCw, LogIn, Lock, Info, 
-            CheckSquare, Square, Trash2, Eye, UserCheck, Wifi, WifiOff,
-            FileText, UploadCloud, X, ExternalLink, Save, BookOpen
-        } = window.lucide;
+        const { useState, useEffect, useRef } = React;
 
-        // Credenciais do seu Firebase integradas
+        // Configuração Real do seu Firebase (Integrada)
         const firebaseConfig = {
             apiKey: "AIzaSyDE5W2dSh9bdsds_E8_5Cvrr0KE2IOlzpI",
             authDomain: "almoxvt.firebaseapp.com",
@@ -78,44 +72,31 @@
             measurementId: "G-CJRY2BQWRH"
         };
 
-        // Inicializando o app Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        const db = firebase.firestore();
-        const auth = firebase.auth();
-
-        const initialSLAHours = 24; 
-
+        // Opções de status e cores padronizadas para o Chão de Fábrica
         const statusOptions = [
             { id: 'pendente', label: 'Pendente', color: 'bg-slate-100 text-slate-800 border-slate-300' },
             { id: 'em_separacao', label: 'Em Separação', color: 'bg-blue-100 text-blue-800 border-blue-300' },
-            { id: 'aguardando_compra', label: 'Aguardando Compra', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-            { id: 'em_producao', label: 'Em Produção', color: 'bg-purple-100 text-purple-800 border-purple-300' },
+            { id: 'aguardando_compra', label: 'Aguardando Compra', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
             { id: 'parcial', label: 'Parcial (Faltam Itens)', color: 'bg-orange-100 text-orange-800 border-orange-300' },
             { id: 'completo', label: 'Kit Completo Separado', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
         ];
 
-        // Dados de amostragem inicial para o modo offline ou banco novo
-        const initialOpmData = [
-            {
-                id: 'exemplo-001',
-                opNumber: 'OP-4599',
-                model: 'Camiseta Basic 01 (Lote Exemplo)',
-                faccaoDestino: 'Oficina Costura Rápida',
-                requestTime: new Date(new Date().getTime() - (2 * 60 * 60 * 1000)).toISOString(),
-                slaDeadline: new Date(new Date().getTime() + (22 * 60 * 60 * 1000)).toISOString(),
-                status: 'pendente',
-                notes: '',
-                completedTime: null,
-                items: [
-                    { name: 'Botão de Pressão Prata 15mm', qtd: 150, checked: false },
-                    { name: 'Etiqueta Interna Composição', qtd: 150, checked: false },
-                    { name: 'Tag Papel Kraft', qtd: 150, checked: false }
-                ]
-            }
-        ];
+        let db = null;
+        let auth = null;
+        let firebaseOnline = false;
 
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+            auth = firebase.auth();
+            firebaseOnline = true;
+        } catch (error) {
+            console.warn("Falha ao inicializar o Firebase. Ativando contingência offline.", error);
+        }
+
+        // Formatação de data amigável para o chão de fábrica
         const formatDateTime = (dateString) => {
             if (!dateString) return '--';
             const date = new Date(dateString);
@@ -128,7 +109,7 @@
             
             if (completedTime) {
                 const comp = new Date(completedTime);
-                return comp <= limit ? { status: 'ok', text: 'No Prazo' } : { status: 'late', text: 'Entregue c/ Atraso' };
+                return comp <= limit ? { status: 'ok', text: 'No Prazo' } : { status: 'late', text: 'Entregue Atrasado' };
             }
             
             if (now > limit) {
@@ -148,133 +129,144 @@
             const [isAuthenticated, setIsAuthenticated] = useState(false);
             const [permissionDeniedError, setPermissionDeniedError] = useState(false);
 
-            // Estados adicionais para checklist dinâmico
-            const [newChecklistName, setNewChecklistName] = useState('');
-            const [newChecklistQtd, setNewChecklistQtd] = useState('');
-            const [tempChecklist, setTempChecklist] = useState([]);
-            const [pdfError, setPdfError] = useState(null);
+            // Controle de Segurança e Modal de Validação de Senha do PCP
+            const [passwordModal, setPasswordModal] = useState({ isOpen: false, type: '', password: '', error: '', actionData: null });
 
-            // Estado para o formulário de Nova/Edição OP
+            // Form de criação/edição
             const [formData, setFormData] = useState({
-                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: [], slaDeadline: '', pdfFile: null
+                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
             });
 
-            // Sincronizador de contingência LocalStorage
-            const loadLocalData = () => {
-                const localData = localStorage.getItem('solicitacoes_local');
-                if (localData) {
-                    setOps(JSON.parse(localData));
-                } else {
-                    localStorage.setItem('solicitacoes_local', JSON.stringify(initialOpmData));
-                    setOps(initialOpmData);
-                }
-            };
+            // Gerenciador de itens rápidos do checklist no Almoxarifado
+            const [newChecklistItem, setNewChecklistItem] = useState('');
 
-            const saveLocalData = (updatedOps) => {
-                setOps(updatedOps);
-                localStorage.setItem('solicitacoes_local', JSON.stringify(updatedOps));
-            };
-
-            useEffect(() => {
-                // Autenticação robusta em segundo plano
-                const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-                    if (user) {
-                        setIsAuthenticated(true);
-                        setAuthError(null);
-                    } else {
-                        setIsAuthenticated(false);
-                        auth.signInAnonymously()
-                            .catch((error) => {
-                                console.error("Erro ao autenticar no modo produção:", error);
-                                setAuthError(error.message);
-                                setDbStatus('offline');
-                                loadLocalData();
-                            });
-                    }
-                });
-                return () => unsubscribeAuth();
-            }, []);
-
-            useEffect(() => {
-                if (!isAuthenticated) return;
-
-                setDbStatus('conectando');
-                setPermissionDeniedError(false);
-
-                const unsubscribe = db.collection("solicitacoes")
-                    .orderBy("requestTime", "desc")
-                    .onSnapshot((snapshot) => {
-                        const items = [];
-                        snapshot.forEach((doc) => {
-                            items.push({ id: doc.id, ...doc.data() });
-                        });
-
-                        if (items.length === 0) {
-                            // Popula o banco novo se estiver totalmente vazio
-                            initialOpmData.forEach(async (op) => {
-                                try {
-                                    await db.collection("solicitacoes").doc(op.id).set(op);
-                                } catch (e) {
-                                    console.error("Erro ao popular banco inicial:", e);
-                                }
-                            });
-                            setOps(initialOpmData);
-                        } else {
-                            setOps(items);
-                            // Sincroniza o local com os dados atualizados da nuvem
-                            localStorage.setItem('solicitacoes_local', JSON.stringify(items));
-                        }
-                        setDbStatus('online');
-                    }, (error) => {
-                        console.error("Erro no canal Firestore controlado:", error);
-                        
-                        // Captura especificamente o erro de regras de segurança insuficientes
-                        if (error.message.includes("permissions") || error.code === "permission-denied") {
-                            setPermissionDeniedError(true);
-                        }
-                        
-                        setDbStatus('offline');
-                        loadLocalData(); // Sobe imediatamente os dados locais para a aplicação não parar!
-                    });
-
-                return () => unsubscribe();
-            }, [isAuthenticated]);
-
-            // Atualiza os ícones do Lucide sempre que renderizar
+            // Efeito para sincronizar ícones do Lucide sempre que a árvore renderizar
             useEffect(() => {
                 if (window.lucide) {
                     window.lucide.createIcons();
                 }
             });
 
+            useEffect(() => {
+                if (!firebaseOnline || !auth) {
+                    setDbStatus('offline');
+                    loadLocalData();
+                    return;
+                }
+
+                auth.signInAnonymously()
+                    .then(() => {
+                        setIsAuthenticated(true);
+                        setAuthError(null);
+                    })
+                    .catch((err) => {
+                        console.error("Erro de Autenticação Firebase: ", err);
+                        setAuthError(err.message);
+                        setDbStatus('offline');
+                        loadLocalData();
+                    });
+            }, []);
+
+            useEffect(() => {
+                if (!isAuthenticated || !db) return;
+
+                setDbStatus('conectando');
+                
+                const unsubscribe = db.collection('ops_aviamentos')
+                    .onSnapshot((snapshot) => {
+                        const loadedOps = [];
+                        snapshot.forEach(doc => {
+                            loadedOps.push({ id: doc.id, ...doc.data() });
+                        });
+                        setOps(loadedOps);
+                        setDbStatus('online');
+                        setPermissionDeniedError(false);
+                        // Sincroniza cache local para contingência futura
+                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
+                    }, (error) => {
+                        console.error("Erro ao ler banco de dados Firestore: ", error);
+                        if (error.message.includes('permissions') || error.code === 'permission-denied') {
+                            setPermissionDeniedError(true);
+                        }
+                        setDbStatus('offline');
+                        loadLocalData();
+                    });
+
+                return () => unsubscribe();
+            }, [isAuthenticated]);
+
+            // Carregamento emergencial via LocalStorage
+            const loadLocalData = () => {
+                const cached = localStorage.getItem('ops_aviamentos_cache');
+                if (cached) {
+                    try {
+                        setOps(JSON.parse(cached));
+                    } catch (e) {
+                        console.error("Erro ao decodificar cache local de dados.", e);
+                    }
+                }
+            };
+
+            const saveOpToDb = (updatedOp) => {
+                if (dbStatus === 'online' && db) {
+                    db.collection('ops_aviamentos').doc(updatedOp.id).set(updatedOp)
+                        .catch(err => {
+                            console.error("Erro ao salvar dados na nuvem, aplicando localmente.", err);
+                            updateLocalState(updatedOp);
+                        });
+                } else {
+                    updateLocalState(updatedOp);
+                }
+            };
+
+            const updateLocalState = (updatedOp) => {
+                const exist = ops.some(o => o.id === updatedOp.id);
+                let newOps = [];
+                if (exist) {
+                    newOps = ops.map(o => o.id === updatedOp.id ? updatedOp : o);
+                } else {
+                    newOps = [...ops, updatedOp];
+                }
+                setOps(newOps);
+                localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+            };
+
+            // Sugestão padrão automática de 24 horas úteis de SLA
+            const getSuggestedSla = () => {
+                const date = new Date();
+                date.setHours(date.getHours() + 24);
+                // Formato ISO local compatível com input datetime-local
+                const tzOffset = date.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(date - tzOffset)).toISOString().slice(0, 16);
+                return localISOTime;
+            };
+
             const handleOpenModal = (op = null) => {
-                setPdfError(null);
                 if (op) {
                     setEditingOp(op);
-                    
-                    const opDate = op.slaDeadline ? new Date(op.slaDeadline) : new Date();
-                    const localISOString = new Date(opDate.getTime() - opDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-
                     setFormData({
-                        opNumber: op.opNumber,
-                        model: op.model,
-                        faccaoDestino: op.faccaoDestino,
-                        status: op.status,
+                        opNumber: op.opNumber || '',
+                        model: op.model || '',
+                        faccaoDestino: op.faccaoDestino || '',
+                        status: op.status || 'pendente',
                         notes: op.notes || '',
-                        items: op.items || [],
-                        slaDeadline: localISOString,
-                        pdfFile: op.pdfFile || null
+                        slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
+                        isPriority: op.isPriority || false,
+                        pdfBase64: op.pdfBase64 || '',
+                        pdfName: op.pdfName || ''
                     });
                 } else {
                     setEditingOp(null);
-                    setTempChecklist([]);
-                    
-                    const defaultDeadline = new Date(new Date().getTime() + (initialSLAHours * 60 * 60 * 1000));
-                    const localISOString = new Date(defaultDeadline.getTime() - defaultDeadline.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-
                     setFormData({ 
-                        opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', items: [],
-                        slaDeadline: localISOString, pdfFile: null
+                        opNumber: '', 
+                        model: '', 
+                        faccaoDestino: '', 
+                        status: 'pendente', 
+                        notes: '', 
+                        slaDeadline: getSuggestedSla(),
+                        isPriority: false,
+                        pdfBase64: '',
+                        pdfName: ''
                     });
                 }
                 setIsModalOpen(true);
@@ -283,163 +275,178 @@
             const handleCloseModal = () => {
                 setIsModalOpen(false);
                 setEditingOp(null);
-                setTempChecklist([]);
-                setPdfError(null);
             };
 
+            // Conversor Inteligente de PDF para Armazenamento Base64 (Com limitador de 800KB para evitar estouro de banda)
             const handlePdfUpload = (e) => {
                 const file = e.target.files[0];
-                setPdfError(null);
                 if (!file) return;
 
-                if (file.type !== 'application/pdf') {
-                    setPdfError('Por favor, selecione apenas arquivos no formato PDF.');
+                if (file.type !== "application/pdf") {
+                    alert("Apenas arquivos no formato PDF são aceitos!");
+                    e.target.value = '';
                     return;
                 }
 
-                if (file.size > 800 * 1024) {
-                    setPdfError('Este PDF ultrapassa o limite de 800KB para armazenamento em nuvem.');
+                if (file.size > 800 * 1024) { // Limite estrito de 800KB
+                    alert("O arquivo PDF ultrapassou o limite máximo de segurança de 800KB. Reduza a resolução e anexe novamente!");
+                    e.target.value = '';
                     return;
                 }
 
                 const reader = new FileReader();
-                reader.onload = (uploadEvent) => {
-                    setFormData({
-                        ...formData,
-                        pdfFile: {
-                            name: file.name,
-                            size: (file.size / 1024).toFixed(1) + ' KB',
-                            data: uploadEvent.target.result
-                        }
-                    });
-                };
-                reader.onerror = () => {
-                    setPdfError('Erro ao ler o arquivo PDF. Tente novamente.');
+                reader.onload = () => {
+                    setFormData(prev => ({
+                        ...prev,
+                        pdfBase64: reader.result,
+                        pdfName: file.name
+                    }));
                 };
                 reader.readAsDataURL(file);
             };
 
-            const handleRemovePdf = () => {
-                setFormData({ ...formData, pdfFile: null });
-                setPdfError(null);
+            const triggerPasswordCheck = (type, actionData = null) => {
+                setPasswordModal({
+                    isOpen: true,
+                    type: type,
+                    password: '',
+                    error: '',
+                    actionData: actionData
+                });
             };
 
-            const handleViewPdf = () => {
-                if (!formData.pdfFile || !formData.pdfFile.data) return;
-                try {
-                    const pdfWindow = window.open();
-                    pdfWindow.document.write(
-                        `<iframe src="${formData.pdfFile.data}" style="border:0; position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`
-                    );
-                    pdfWindow.document.title = `Ficha Técnica OP - ${formData.opNumber}`;
-                } catch (err) {
-                    setPdfError('Bloqueador de pop-ups ativado. Por favor, libere a abertura de abas.');
+            const handleVerifyPassword = (e) => {
+                e.preventDefault();
+                if (passwordModal.password !== '123456') {
+                    setPasswordModal(prev => ({ ...prev, error: 'Senha do PCP incorreta! Ação não autorizada.' }));
+                    return;
+                }
+
+                // Senha Correta -> Executa a ação pendente
+                const action = passwordModal.type;
+                const data = passwordModal.actionData;
+
+                // Fecha modal de verificação
+                setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null });
+
+                if (action === 'delete') {
+                    executeDeleteOp(data.id);
+                } else if (action === 'allow_edit') {
+                    // Abre modo de edição irrestrito no formulário para o PCP
+                    setEditingOp(data);
+                    setFormData({
+                        opNumber: data.opNumber || '',
+                        model: data.model || '',
+                        faccaoDestino: data.faccaoDestino || '',
+                        status: data.status || 'pendente',
+                        notes: data.notes || '',
+                        slaDeadline: data.slaDeadline ? data.slaDeadline.slice(0, 16) : getSuggestedSla(),
+                        isPriority: data.isPriority || false,
+                        pdfBase64: data.pdfBase64 || '',
+                        pdfName: data.pdfName || ''
+                    });
+                } else if (action === 'save_edit') {
+                    executeSaveOp(data);
                 }
             };
 
-            const addChecklistItem = () => {
-                if (!newChecklistName || !newChecklistQtd) return;
-                const newItem = {
-                    name: newChecklistName,
-                    qtd: parseInt(newChecklistQtd, 10) || 0,
-                    checked: false
-                };
-                if (editingOp) {
-                    const updatedItems = [...formData.items, newItem];
-                    setFormData({ ...formData, items: updatedItems });
+            const executeDeleteOp = (opId) => {
+                if (dbStatus === 'online' && db) {
+                    db.collection('ops_aviamentos').doc(opId).delete()
+                        .then(() => handleCloseModal())
+                        .catch(err => console.error("Erro ao deletar OP na nuvem: ", err));
                 } else {
-                    setTempChecklist([...tempChecklist, newItem]);
-                }
-                setNewChecklistName('');
-                setNewChecklistQtd('');
-            };
-
-            const removeChecklistItem = (index) => {
-                if (editingOp) {
-                    const updatedItems = formData.items.filter((_, i) => i !== index);
-                    setFormData({ ...formData, items: updatedItems });
-                } else {
-                    setTempChecklist(tempChecklist.filter((_, i) => i !== index));
+                    const newOps = ops.filter(o => o.id !== opId);
+                    setOps(newOps);
+                    localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+                    handleCloseModal();
                 }
             };
 
-            const toggleItemChecked = async (index) => {
-                if (userRole !== 'almoxarifado') return;
-                const updatedItems = formData.items.map((item, i) => 
-                    i === index ? { ...item, checked: !item.checked } : item
-                );
-                setFormData({ ...formData, items: updatedItems });
-            };
-
-            const handleSaveOp = async (e) => {
+            const handleSaveOp = (e) => {
                 e.preventDefault();
                 const now = new Date();
                 
+                // Formatação correta para salvar o prazo digitado
+                const formattedDeadline = new Date(formData.slaDeadline).toISOString();
+
                 if (editingOp) {
-                    if (userRole !== 'almoxarifado') return;
-
-                    let compTime = editingOp.completedTime;
-                    if (formData.status === 'completo' && editingOp.status !== 'completo') {
-                        compTime = now.toISOString();
-                    } else if (formData.status !== 'completo') {
-                        compTime = null;
-                    }
-
-                    const updatedData = {
-                        status: formData.status,
-                        notes: formData.notes,
-                        items: formData.items,
-                        completedTime: compTime
-                    };
-
-                    // Verifica se o banco real está acessível
-                    if (dbStatus === 'online' && !permissionDeniedError) {
-                        try {
-                            await db.collection("solicitacoes").doc(editingOp.id).update(updatedData);
-                        } catch (error) {
-                            console.warn("Falha ao salvar em nuvem. Gravando local...", error);
-                            const updatedLocal = ops.map(op => op.id === editingOp.id ? { ...op, ...updatedData } : op);
-                            saveLocalData(updatedLocal);
-                        }
+                    // Se estivermos editando e for alteração de PCP, exige a senha para salvar
+                    if (userRole === 'pcp') {
+                        triggerPasswordCheck('save_edit', { ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     } else {
-                        // Salva diretamente local se a nuvem estiver bloqueada/offline
-                        const updatedLocal = ops.map(op => op.id === editingOp.id ? { ...op, ...updatedData } : op);
-                        saveLocalData(updatedLocal);
+                        // Se for almoxarifado, salva direto (apenas status/observações/checklist estão liberados de qualquer forma)
+                        executeSaveOp({ ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     }
                 } else {
-                    if (userRole !== 'pcp') return;
-
-                    const selectedDeadlineISO = formData.slaDeadline ? new Date(formData.slaDeadline).toISOString() : new Date(now.getTime() + (initialSLAHours * 60 * 60 * 1000)).toISOString();
-
+                    // Criar Nova OP (Sem senha necessária para criar do zero)
                     const newOp = {
-                        id: `op-local-${Date.now()}`,
+                        id: `sol-${Date.now()}`,
                         opNumber: formData.opNumber,
                         model: formData.model,
                         faccaoDestino: formData.faccaoDestino,
                         status: 'pendente',
-                        notes: '',
+                        notes: formData.notes,
                         requestTime: now.toISOString(),
-                        slaDeadline: selectedDeadlineISO,
+                        slaDeadline: formattedDeadline,
                         completedTime: null,
-                        items: tempChecklist,
-                        pdfFile: formData.pdfFile || null
+                        isPriority: formData.isPriority,
+                        pdfBase64: formData.pdfBase64,
+                        pdfName: formData.pdfName,
+                        items: []
                     };
-
-                    if (dbStatus === 'online' && !permissionDeniedError) {
-                        try {
-                            // Salva no banco com o mesmo ID para evitar duplicações
-                            await db.collection("solicitacoes").doc(newOp.id).set(newOp);
-                        } catch (error) {
-                            console.warn("Falha ao criar em nuvem. Gravando local...", error);
-                            saveLocalData([newOp, ...ops]);
-                        }
-                    } else {
-                        saveLocalData([newOp, ...ops]);
-                    }
+                    saveOpToDb(newOp);
+                    handleCloseModal();
                 }
+            };
+
+            const executeSaveOp = (opToSave) => {
+                const now = new Date();
+                let finalOp = { ...opToSave };
+
+                // Define carimbo de tempo caso mude para o status de 'completo'
+                if (opToSave.status === 'completo') {
+                    finalOp.completedTime = now.toISOString();
+                } else {
+                    finalOp.completedTime = null;
+                }
+
+                saveOpToDb(finalOp);
                 handleCloseModal();
             };
 
+            const handleToggleChecklistItem = (itemIndex) => {
+                if (!editingOp) return;
+                const updatedItems = [...(editingOp.items || [])];
+                updatedItems[itemIndex].checked = !updatedItems[itemIndex].checked;
+
+                const updatedOp = { ...editingOp, items: updatedItems };
+                setEditingOp(updatedOp);
+                saveOpToDb(updatedOp);
+            };
+
+            const handleAddChecklistItem = (e) => {
+                e.preventDefault();
+                if (!newChecklistItem.trim() || !editingOp) return;
+
+                const updatedItems = [...(editingOp.items || []), { name: newChecklistItem.trim(), checked: false }];
+                const updatedOp = { ...editingOp, items: updatedItems };
+                
+                setEditingOp(updatedOp);
+                saveOpToDb(updatedOp);
+                setNewChecklistItem('');
+            };
+
+            const handleRemoveChecklistItem = (itemIndex) => {
+                if (!editingOp) return;
+                const updatedItems = (editingOp.items || []).filter((_, idx) => idx !== itemIndex);
+                const updatedOp = { ...editingOp, items: updatedItems };
+                
+                setEditingOp(updatedOp);
+                saveOpToDb(updatedOp);
+            };
+
+            // Regra de arquivamento automático após 24 horas de kit completo para liberar espaço visual
             const isCompletedAndOld = (op) => {
                 if (op.status !== 'completo' || !op.completedTime) return false;
                 const completedAt = new Date(op.completedTime).getTime();
@@ -450,12 +457,14 @@
 
             const visibleOps = ops.filter(op => !isCompletedAndOld(op));
 
+            // Filtro de buscas de topo
             const filteredOps = visibleOps.filter(op => 
-                (op.opNumber && op.opNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                (op.model && op.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                (op.faccaoDestino && op.faccaoDestino.toLowerCase().includes(searchTerm.toLowerCase()))
+                (op.opNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (op.model || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (op.faccaoDestino || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
 
+            // KPIs unificados de controle
             const totalOps = visibleOps.length;
             const completedOps = visibleOps.filter(op => op.status === 'completo').length;
             const pendingOps = totalOps - completedOps;
@@ -463,75 +472,113 @@
 
             const renderCard = (op) => {
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                const statusInfo = statusOptions.find(s => s.id === op.status);
+                const isLate = sla.status === 'late' && op.status !== 'completo';
 
                 return (
                     <div 
                         key={op.id} 
-                        className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-3 hover:shadow-md transition-shadow cursor-pointer relative overflow-hidden" 
                         onClick={() => handleOpenModal(op)}
+                        className={`bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border-2 relative overflow-hidden mb-3 ${
+                            op.isPriority 
+                            ? 'border-amber-400 bg-gradient-to-br from-amber-50/30 to-white shadow-amber-100/50' 
+                            : 'border-slate-100 hover:border-slate-300'
+                        }`}
                     >
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${sla.status === 'late' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                        
-                        <div className="flex justify-between items-start mb-2 pl-1">
-                            <h4 className="font-bold text-slate-800 flex items-center gap-1">
-                                {op.opNumber}
-                                {op.pdfFile && (
-                                    <span title="Ficha Técnica / PDF Anexo">
-                                        <i data-lucide="file-text" className="w-3.5 h-3.5 text-blue-500"></i>
+                        {/* Indicador de Prioridade Máxima */}
+                        {op.isPriority && (
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400"></div>
+                        )}
+
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-1.5">
+                                <h4 className="font-bold text-slate-800 text-sm">{op.opNumber}</h4>
+                                {op.isPriority && (
+                                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                        <i data-lucide="zap" className="w-2.5 h-2.5 fill-amber-500 text-amber-500"></i> PRIORITÁRIO
                                     </span>
                                 )}
-                            </h4>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${sla.status === 'late' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${sla.status === 'late' ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
+                            </div>
+                            
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                isLate 
+                                ? 'bg-red-100 text-red-700 animate-pulse' 
+                                : op.status === 'completo' 
+                                ? 'bg-emerald-100 text-emerald-700' 
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
                                 {sla.text}
                             </span>
                         </div>
                         
-                        <p className="text-sm text-slate-600 mb-1 font-medium pl-1">{op.model}</p>
-                        <p className="text-xs text-slate-500 mb-3 flex items-center pl-1">
-                            <i data-lucide="truck" className="w-3.5 h-3.5 mr-1 text-slate-400"></i> {op.faccaoDestino || 'Interno'}
-                        </p>
+                        <p className="text-xs font-semibold text-slate-600 mb-1 line-clamp-1">{op.model}</p>
                         
-                        <div className="text-[11px] text-slate-500 mb-2 space-y-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                            <div className="flex items-center gap-1.5">
-                                <i data-lucide="clock" className="w-3 h-3 text-slate-400"></i>
-                                <span>Solicitação: {formatDateTime(op.requestTime)}</span>
+                        <p className="text-[11px] text-slate-500 mb-3 flex items-center gap-1">
+                            <i data-lucide="truck" className="w-3 h-3"></i> {op.faccaoDestino || 'Setor Interno'}
+                        </p>
+
+                        <div className="text-[10px] text-slate-400 space-y-0.5 border-t border-slate-50 pt-2 mb-2">
+                            <div className="flex items-center gap-1">
+                                <i data-lucide="calendar" className="w-3 h-3"></i> Solicitado: {formatDateTime(op.requestTime)}
                             </div>
-                            <div className="flex items-center gap-1.5">
-                                <i data-lucide="alert-circle" className="w-3 h-3 text-slate-400"></i>
-                                <span className={sla.status === 'late' ? 'text-rose-600 font-semibold' : ''}>Prazo: {formatDateTime(op.slaDeadline)}</span>
+                            <div className="flex items-center gap-1 font-medium text-slate-500">
+                                <i data-lucide="alarm-clock" className="w-3 h-3 text-slate-400"></i> Limite: {formatDateTime(op.slaDeadline)}
                             </div>
                         </div>
 
-                        {op.notes && (
-                            <div className="mt-2 p-2 bg-amber-50/50 rounded-lg text-[11px] text-amber-900 border border-amber-100">
-                                <strong>Obs:</strong> {op.notes.length > 55 ? op.notes.substring(0,55) + '...' : op.notes}
+                        {/* Indicador se possui PDF anexo */}
+                        {op.pdfBase64 && (
+                            <div className="mt-1 mb-2 inline-flex items-center gap-1 text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">
+                                <i data-lucide="file-text" className="w-3 h-3"></i> Ficha Técnica PDF
                             </div>
                         )}
-                        
-                        <div className="mt-2 flex justify-between items-center bg-slate-100/50 px-2 py-1 rounded text-[11px] text-slate-500">
-                            {op.pdfFile ? (
-                                <span className="flex items-center gap-1 text-blue-600 font-medium">
-                                    <i data-lucide="file-text" className="w-3 h-3"></i> PDF da OP Anexo
-                                </span>
-                            ) : (
-                                <span className="text-slate-400">Sem PDF</span>
-                            )}
-                            {op.items && op.items.length > 0 ? (
-                                <span className="font-bold text-slate-700">
-                                    {op.items.filter(i => i.checked).length}/{op.items.length} checklist
-                                </span>
-                            ) : (
-                                <span className="text-slate-400">Sem checklist</span>
-                            )}
-                        </div>
+
+                        {/* Barra de Progresso do Checklist de Separação */}
+                        {op.items && op.items.length > 0 && (
+                            <div className="mt-2">
+                                <div className="flex justify-between text-[10px] text-slate-500 mb-1 font-medium">
+                                    <span>Checklist Aviamento</span>
+                                    <span>{op.items.filter(i => i.checked).length}/{op.items.length} itens</span>
+                                </div>
+                                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                    <div 
+                                        className="bg-emerald-500 h-1.5 transition-all duration-300" 
+                                        style={{ width: `${(op.items.filter(i => i.checked).length / op.items.length) * 100}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 );
             };
 
             return (
                 <div className="min-h-screen flex flex-col">
+                    
+                    {/* Alerta inteligente de bloqueio de Referer (Domínio de Teste Bloqueado pelo GCP) */}
+                    {authError && (authError.includes('requests-from-referer') || authError.includes('blocked')) && (
+                        <div className="bg-blue-50 border-b border-blue-200 p-4">
+                            <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-2 bg-blue-100 rounded-lg text-blue-800">
+                                        <i data-lucide="lock" className="w-5 h-5"></i>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-blue-900">Segurança Ativa: Chave de API Protegida</h3>
+                                        <p className="text-xs text-blue-700 mt-0.5">
+                                            O Google bloqueou a conexão porque este ambiente de teste (Preview) não está autorizado nas credenciais do seu Google Cloud. 
+                                            <strong> Isso é excelente!</strong> Significa que suas restrições de segurança estão funcionando. O app ativou a <strong>Contingência Local</strong> para que você teste aqui normalmente.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2.5 py-1 rounded-full">
+                                        Segurança OK
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Alerta inteligente de permissão de segurança do Firebase */}
                     {permissionDeniedError && (
                         <div className="bg-amber-50 border-b border-amber-200 p-4">
@@ -541,65 +588,58 @@
                                         <i data-lucide="alert-triangle" className="w-5 h-5"></i>
                                     </div>
                                     <div>
-                                        <h3 className="text-sm font-bold text-amber-900">Banco de Dados em Produção Bloqueado (Permissão Negada)</h3>
+                                        <h3 className="text-sm font-bold text-amber-900">Modo de Operação Local Ativado</h3>
                                         <p className="text-xs text-amber-700 mt-0.5">
-                                            O Firebase rejeitou o carregamento devido às regras de segurança. 
-                                            O aplicativo ativou o <strong>Modo Local de Contingência</strong> automaticamente: você pode usar a tela normalmente!
+                                            As regras de segurança do seu banco Firestore no Modo Produção ainda estão bloqueando o tráfego externo. 
+                                            Para colocar em nuvem, acesse a aba <strong>Rules</strong> do seu console e mude para <code>allow read, write: if request.auth != null;</code>.
                                         </p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <a 
-                                        href="https://console.firebase.google.com/" 
-                                        target="_blank" 
-                                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm"
-                                    >
-                                        <i data-lucide="external-link" className="w-3.5 h-3.5"></i>
-                                        Ajustar Regras no Firebase
-                                    </a>
+                                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-1 rounded-full">
+                                        Falta Configuração
+                                    </span>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Header Premium com Perfis de Governança */}
-                    <header className="glass-header sticky top-0 z-40 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                    {/* Header Principal */}
+                    <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
                         <div className="flex items-center gap-3">
-                            <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-sm">
+                            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-100">
                                 <i data-lucide="package" className="w-6 h-6"></i>
                             </div>
                             <div>
-                                <h1 className="text-xl font-bold text-slate-800 leading-tight">Almoxarifado Flow</h1>
-                                <p className="text-xs text-slate-500">Gestão e Canal de Aviamentos por OP</p>
+                                <h1 className="text-lg font-bold text-slate-800 leading-tight">Almoxarifado Flow</h1>
+                                <p className="text-xs text-slate-400">Gestão de Aviamentos por OP</p>
                             </div>
                         </div>
 
                         <div className="flex flex-wrap gap-3 items-center w-full md:w-auto justify-end">
-                            {/* Controle de Segurança / Governança */}
+                            {/* Chave de Atuação (PCP ou Almoxarifado) */}
                             <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
                                 <button 
-                                    onClick={() => { setUserRole('pcp'); handleCloseModal(); }}
-                                    className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${userRole === 'pcp' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}
+                                    onClick={() => setUserRole('pcp')}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'pcp' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                                 >
-                                    <i data-lucide="edit-2" className="w-3.5 h-3.5"></i>
-                                    Painel PCP
+                                    <i data-lucide="layers" className="w-3.5 h-3.5"></i> PCP / Planejamento
                                 </button>
                                 <button 
-                                    onClick={() => { setUserRole('almoxarifado'); handleCloseModal(); }}
-                                    className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${userRole === 'almoxarifado' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}
+                                    onClick={() => setUserRole('almoxarifado')}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'almoxarifado' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                                 >
-                                    <i data-lucide="check-square" className="w-3.5 h-3.5"></i>
-                                    Almoxarifado
+                                    <i data-lucide="check-square" className="w-3.5 h-3.5"></i> Almoxarifado
                                 </button>
                             </div>
 
-                            {/* Barra de Pesquisa */}
-                            <div className="relative">
-                                <i data-lucide="search" className="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                            {/* Input de Pesquisas */}
+                            <div className="relative w-full md:w-64">
+                                <i data-lucide="search" className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
                                 <input 
                                     type="text" 
-                                    placeholder="Buscar OP, Modelo..." 
-                                    className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none w-48 md:w-56 bg-slate-50/50"
+                                    placeholder="Buscar OP, Modelo, Destino..." 
+                                    className="pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none w-full"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
@@ -608,56 +648,65 @@
                             {userRole === 'pcp' && (
                                 <button 
                                     onClick={() => handleOpenModal()}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 shadow-sm shadow-blue-100">
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-100">
                                     <i data-lucide="plus" className="w-4 h-4"></i> Nova OP
                                 </button>
                             )}
                         </div>
                     </header>
 
-                    {/* Conteúdo Principal do Painel */}
-                    <main className="flex-1 p-6 flex flex-col gap-6">
-                        
-                        {/* Indicadores KPIs */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+                    {/* Grid de KPIs no Chão de Fábrica */}
+                    <main className="flex-1 p-6 flex flex-col">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 rounded-xl text-blue-600"><i data-lucide="file-text" className="w-5 h-5"></i></div>
-                                <div><p className="text-xs text-slate-500 font-medium">Total de Fila</p><p className="text-xl font-bold text-slate-800">{totalOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ativas na Fila</p><p className="text-xl font-extrabold text-slate-800">{totalOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-                                <div className="p-3 bg-amber-50 rounded-xl text-amber-600"><i data-lucide="clock" className="w-5 h-5"></i></div>
-                                <div><p className="text-xs text-slate-500 font-medium">Em Separação</p><p className="text-xl font-bold text-slate-800">{pendingOps}</p></div>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-yellow-50 rounded-xl text-yellow-600"><i data-lucide="timer" className="w-5 h-5"></i></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Pendentes</p><p className="text-xl font-extrabold text-slate-800">{pendingOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-                                <div className="p-3 bg-rose-50 rounded-xl text-rose-600"><i data-lucide="alert-triangle" className="w-5 h-5 animate-bounce"></i></div>
-                                <div><p className="text-xs text-slate-500 font-medium">Atrasos (SLA)</p><p className="text-xl font-bold text-rose-700">{lateOps}</p></div>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-red-50 rounded-xl text-red-600"><i data-lucide="alert-octagon" className="w-5 h-5"></i></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atrasadas (SLA)</p><p className="text-xl font-extrabold text-slate-800">{lateOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-                                <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600"><i data-lucide="check-circle" className="w-5 h-5"></i></div>
-                                <div><p className="text-xs text-slate-500 font-medium">Entregues (24h)</p><p className="text-xl font-bold text-slate-800">{completedOps}</p></div>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600"><i data-lucide="check-circle-2" className="w-5 h-5"></i></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Prontos / Saídos</p><p className="text-xl font-extrabold text-slate-800">{completedOps}</p></div>
                             </div>
                         </div>
 
-                        {/* Kanban */}
-                        <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
-                            <div className="flex gap-4 h-full items-start min-w-max">
+                        {/* Kanban Principal */}
+                        <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
+                            <div className="flex gap-6 h-full items-start min-w-[1200px]">
                                 
+                                {}
                                 {statusOptions.map(status => {
-                                    const colOps = filteredOps.filter(op => op.status === status.id);
+                                    // Filtragem e ordenação estrita por prioridade e depois prazo
+                                    const colOps = filteredOps
+                                        .filter(op => op.status === status.id)
+                                        .sort((a, b) => {
+                                            // Se um for prioridade e outro não, prioridade vai primeiro
+                                            if (a.isPriority && !b.isPriority) return -1;
+                                            if (!a.isPriority && b.isPriority) return 1;
+                                            // Se empatar na prioridade, ordena pelo prazo mais próximo primeiro
+                                            return new Date(a.slaDeadline) - new Date(b.slaDeadline);
+                                        });
+
                                     return (
-                                        <div key={status.id} className="w-72 flex flex-col max-h-[75vh] bg-slate-50 rounded-2xl border border-slate-200 flex-shrink-0">
-                                            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-slate-100/50 rounded-t-2xl">
-                                                <h3 className="font-semibold text-slate-700 text-xs flex items-center gap-2">
+                                        <div key={status.id} className="w-80 flex flex-col bg-slate-50 border border-slate-200 rounded-2xl h-[calc(100vh-280px)] min-h-[450px]">
+                                            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-slate-100 rounded-t-2xl">
+                                                <h3 className="font-bold text-slate-700 text-xs flex items-center gap-2">
                                                     <span className={`w-2.5 h-2.5 rounded-full ${status.color.split(' ')[0]}`}></span>
                                                     {status.label}
                                                 </h3>
                                                 <span className="bg-slate-200 text-slate-600 text-[10px] py-0.5 px-2 rounded-full font-bold">{colOps.length}</span>
                                             </div>
-                                            <div className="p-3 overflow-y-auto flex-1 custom-scrollbar kanban-col">
+                                            <div className="p-3 overflow-y-auto flex-1 custom-scrollbar">
                                                 {colOps.map(op => renderCard(op))}
                                                 {colOps.length === 0 && (
-                                                    <div className="text-center py-10 text-slate-400 text-xs border-2 border-dashed border-slate-200 rounded-xl bg-white/50">
-                                                        Vazio
+                                                    <div className="text-center py-12 text-slate-400 text-xs border-2 border-dashed border-slate-200 rounded-xl bg-white/50">
+                                                        Nenhuma OP nesta etapa
                                                     </div>
                                                 )}
                                             </div>
@@ -669,38 +718,81 @@
                         </div>
                     </main>
 
-                    {/* Modal de Detalhes da OP */}
+                    {/* Rodapé Dinâmico com Indicador de Conexão */}
+                    <footer className="bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center text-xs text-slate-400">
+                        <div className="flex items-center gap-2">
+                            <span className={`w-2.5 h-2.5 rounded-full ${
+                                dbStatus === 'online' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+                            }`}></span>
+                            <span className="font-semibold text-slate-500">
+                                {dbStatus === 'online' ? 'Nuvem Conectada (Realtime)' : 'Modo Contingência (Offline / Local)'}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="font-bold text-slate-500 uppercase">Perfil Ativo: {userRole === 'pcp' ? 'PCP' : 'Almoxarifado'}</span>
+                        </div>
+                    </footer>
+
+                    {}
                     {isModalOpen && (
-                        <div className="fixed inset-0 bg-slate-950/40 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                                    <h2 className="text-md font-bold text-slate-800 flex items-center gap-2">
-                                        <i data-lucide={editingOp ? "eye" : "plus"} className="w-5 h-5 text-blue-600"></i>
-                                        {editingOp ? `Gerenciar OP: ${editingOp.opNumber}` : 'Nova Solicitação de Aviamentos'}
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                    <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                        <i data-lucide="edit-3" className="w-4 h-4"></i>
+                                        {editingOp ? `Gerenciar Solicitação: ${editingOp.opNumber}` : 'Nova Ordem de Aviamento'}
                                     </h2>
                                     <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                                         <i data-lucide="x" className="w-5 h-5"></i>
                                     </button>
                                 </div>
                                 
-                                <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-5">
+                                <div className="p-6 overflow-y-auto flex-1 space-y-5">
+                                    
+                                    {/* Botões de exclusão e edição sob controle PCP */}
+                                    {editingOp && userRole === 'pcp' && (
+                                        <div className="flex justify-between items-center p-3 bg-red-50 border border-red-100 rounded-xl">
+                                            <div className="text-xs text-red-800">
+                                                <strong>Controle de Ciclo de Vida:</strong> Exclua ou gerencie o cadastro original desta solicitação.
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => triggerPasswordCheck('allow_edit', editingOp)}
+                                                    className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-xs font-bold rounded-lg hover:bg-red-100 flex items-center gap-1"
+                                                >
+                                                    <i data-lucide="lock" className="w-3.5 h-3.5"></i> Liberar Edição
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => triggerPasswordCheck('delete', editingOp)}
+                                                    className="px-3 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 flex items-center gap-1 shadow-sm"
+                                                >
+                                                    <i data-lucide="trash-2" className="w-3.5 h-3.5"></i> Excluir OP
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <form id="opForm" onSubmit={handleSaveOp} className="space-y-4">
-                                        <div className="grid grid-cols-2 gap-4">
+                                        
+                                        {/* Inputs bloqueados para o Almoxarifado para preservar consistência do PCP */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Número da OP *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Número da OP *</label>
                                                 <input 
-                                                    type="text" required
-                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                                                    type="text" required placeholder="Ex: OP-4780"
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
                                                     value={formData.opNumber} 
                                                     onChange={e => setFormData({...formData, opNumber: e.target.value})}
                                                     disabled={!!editingOp || userRole !== 'pcp'}
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Modelo / Referência *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Modelo / Referência *</label>
                                                 <input 
-                                                    type="text" required
-                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                                                    type="text" required placeholder="Ex: Camisa Social Slim"
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
                                                     value={formData.model} 
                                                     onChange={e => setFormData({...formData, model: e.target.value})}
                                                     disabled={!!editingOp || userRole !== 'pcp'}
@@ -710,203 +802,166 @@
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Destino (Facção / Oficina Terceira) *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fração / Facção de Destino *</label>
                                                 <input 
-                                                    type="text" required placeholder="Ex: Oficina Confecção Silva"
-                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                                                    type="text" required placeholder="Ex: Oficina Estrela da Costura"
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
                                                     value={formData.faccaoDestino} 
                                                     onChange={e => setFormData({...formData, faccaoDestino: e.target.value})}
-                                                    disabled={!!editingOp || userRole !== 'pcp'}
+                                                    disabled={userRole !== 'pcp'}
                                                 />
                                             </div>
-                                            
                                             <div>
-                                                <label className="block text-xs font-semibold text-slate-600 mb-1">Prazo de Entrega (SLA) *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data e Hora de Entrega (SLA) *</label>
                                                 <input 
                                                     type="datetime-local" required
-                                                    className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-500 font-medium"
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
                                                     value={formData.slaDeadline} 
                                                     onChange={e => setFormData({...formData, slaDeadline: e.target.value})}
-                                                    disabled={!!editingOp || userRole !== 'pcp'}
+                                                    disabled={userRole !== 'pcp'}
                                                 />
                                             </div>
                                         </div>
 
-                                        {/* Anexo de PDF */}
-                                        <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
-                                            <h3 className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
-                                                <span>Ficha Técnica / PDF da OP</span>
-                                                <span className="text-[10px] text-slate-400">Opcional (Máx: 800KB)</span>
-                                            </h3>
-
-                                            {pdfError && (
-                                                <div className="mb-3 p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 flex items-center gap-1.5">
-                                                    <i data-lucide="alert-circle" className="w-4 h-4 flex-shrink-0"></i>
-                                                    <span>{pdfError}</span>
-                                                </div>
-                                            )}
-
-                                            {!formData.pdfFile ? (
-                                                userRole === 'pcp' ? (
-                                                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-400 transition-colors bg-white cursor-pointer relative">
-                                                        <input 
-                                                            type="file" 
-                                                            accept=".pdf"
-                                                            onChange={handlePdfUpload}
-                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                        />
-                                                        <div className="flex flex-col items-center justify-center gap-1.5">
-                                                            <div className="p-2 bg-blue-50 rounded-full text-blue-500">
-                                                                <i data-lucide="upload-cloud" className="w-5 h-5"></i>
-                                                            </div>
-                                                            <span className="text-xs font-semibold text-slate-700">Clique para anexar o PDF da OP</span>
-                                                            <span className="text-[10px] text-slate-400">Formatos aceitos: apenas arquivos .pdf</span>
-                                                        </div>
+                                        {/* Upload de Ficha Técnica / PDF da OP */}
+                                        {userRole === 'pcp' && !editingOp && (
+                                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                                <label className="block text-xs font-bold text-slate-600 uppercase mb-1 flex items-center gap-1.5">
+                                                    <i data-lucide="file-plus" className="w-4 h-4"></i> Anexar PDF da OP / Ficha Técnica (Max 800KB)
+                                                </label>
+                                                <input 
+                                                    type="file" 
+                                                    accept=".pdf"
+                                                    onChange={handlePdfUpload}
+                                                    className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                                                />
+                                                {formData.pdfName && (
+                                                    <div className="mt-2 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                                                        <i data-lucide="check-circle-2" className="w-3.5 h-3.5"></i> PDF Pronto: {formData.pdfName}
                                                     </div>
-                                                ) : (
-                                                    <div className="p-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 bg-white rounded-xl">
-                                                        Nenhum documento PDF anexado.
-                                                    </div>
-                                                )
-                                            ) : (
-                                                <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl">
-                                                    <div className="flex items-center gap-2.5 min-w-0">
-                                                        <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
-                                                            <i data-lucide="file-text" className="w-5 h-5"></i>
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <p className="text-xs font-semibold text-slate-800 truncate" title={formData.pdfFile.name}>
-                                                                {formData.pdfFile.name}
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-400">{formData.pdfFile.size}</p>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex items-center gap-2">
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={handleViewPdf}
-                                                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
-                                                        >
-                                                            <i data-lucide="external-link" className="w-3.5 h-3.5"></i>
-                                                            Visualizar
-                                                        </button>
-                                                        {userRole === 'pcp' && !editingOp && (
-                                                            <button 
-                                                                type="button" 
-                                                                onClick={handleRemovePdf}
-                                                                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
-                                                            >
-                                                                <i data-lucide="x" className="w-4 h-4"></i>
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Checklist */}
-                                        <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
-                                            <h3 className="text-xs font-bold text-slate-700 mb-3 flex items-center justify-between">
-                                                <span>Checklist Opcional de Aviamentos Requisitados</span>
-                                                {userRole === 'pcp' && <span className="text-[10px] text-blue-600 font-medium">Apenas PCP cadastra</span>}
-                                                {userRole === 'almoxarifado' && <span className="text-[10px] text-emerald-600 font-medium">Almoxarifado: Clique para dar baixa</span>}
-                                            </h3>
-
-                                            {userRole === 'pcp' && (
-                                                <div className="flex gap-2 mb-3">
-                                                    <input 
-                                                        type="text" placeholder="Nome do aviamento..." 
-                                                        className="flex-1 p-2 border border-slate-200 rounded-xl text-xs bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                                        value={newChecklistName}
-                                                        onChange={e => setNewChecklistName(e.target.value)}
-                                                    />
-                                                    <input 
-                                                        type="number" placeholder="Qtd" 
-                                                        className="w-20 p-2 border border-slate-200 rounded-xl text-xs bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                                        value={newChecklistQtd}
-                                                        onChange={e => setNewChecklistQtd(e.target.value)}
-                                                    />
-                                                    <button 
-                                                        type="button" onClick={addChecklistItem}
-                                                        className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-xl text-xs font-semibold flex items-center gap-1"
-                                                    >
-                                                        Adicionar
-                                                    </button>
-                                                </div>
-                                            )}
-
-                                            <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
-                                                {((editingOp ? formData.items : tempChecklist) || []).map((item, index) => (
-                                                    <div 
-                                                        key={index} 
-                                                        onClick={() => toggleItemChecked(index)}
-                                                        className={`flex justify-between items-center p-2 rounded-xl border transition-all ${item.checked ? 'bg-emerald-50 border-emerald-100 text-emerald-900' : 'bg-white border-slate-200 text-slate-700'} ${userRole === 'almoxarifado' ? 'cursor-pointer hover:bg-slate-50' : ''}`}
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            {userRole === 'almoxarifado' ? (
-                                                                <span>
-                                                                    {item.checked ? (
-                                                                        <i data-lucide="check-square" className="w-4 h-4 text-emerald-600"></i>
-                                                                    ) : (
-                                                                        <i data-lucide="square" className="w-4 h-4 text-slate-400"></i>
-                                                                    )}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                                                            )}
-                                                            <span className="text-xs font-medium">{item.name}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="text-xs font-bold px-2 py-0.5 bg-slate-100 rounded-full text-slate-600">{item.qtd} un</span>
-                                                            {userRole === 'pcp' && (
-                                                                <button 
-                                                                    type="button" onClick={(e) => { e.stopPropagation(); removeChecklistItem(index); }}
-                                                                    className="text-slate-400 hover:text-rose-600"
-                                                                >
-                                                                    <i data-lucide="trash-2" className="w-3.5 h-3.5"></i>
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))}
-
-                                                {((editingOp ? formData.items : tempChecklist) || []).length === 0 && (
-                                                    <p className="text-center text-slate-400 text-xs py-4">Nenhum aviamento no checklist.</p>
                                                 )}
                                             </div>
-                                        </div>
+                                        )}
 
-                                        {/* Tratativa de Retorno (Almoxarifado) */}
+                                        {/* Seletor de Prioridade do PCP */}
+                                        {userRole === 'pcp' && !editingOp && (
+                                            <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="priorityCheckbox"
+                                                    className="w-4 h-4 text-amber-600 border-amber-300 rounded focus:ring-amber-500 cursor-pointer"
+                                                    checked={formData.isPriority}
+                                                    onChange={e => setFormData({...formData, isPriority: e.target.checked})}
+                                                />
+                                                <label htmlFor="priorityCheckbox" className="text-xs font-bold text-amber-900 cursor-pointer flex items-center gap-1 select-none">
+                                                    <i data-lucide="zap" className="w-4 h-4 fill-amber-500 text-amber-500"></i> Marcar como PRIORIDADE MÁXIMA (Urgente)
+                                                </label>
+                                            </div>
+                                        )}
+
+                                        {/* Botão de Visualização Dinâmica do PDF anexado */}
+                                        {editingOp && editingOp.pdfBase64 && (
+                                            <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex justify-between items-center">
+                                                <div className="text-xs text-blue-800 font-semibold flex items-center gap-1.5">
+                                                    <i data-lucide="file-text" className="w-4 h-4"></i> {editingOp.pdfName || "Ficha_Tecnica.pdf"}
+                                                </div>
+                                                <a 
+                                                    href={editingOp.pdfBase64} 
+                                                    target="_blank" 
+                                                    rel="noopener noreferrer"
+                                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm transition-all"
+                                                >
+                                                    <i data-lucide="eye" className="w-3.5 h-3.5"></i> Visualizar Ficha Técnica
+                                                </a>
+                                            </div>
+                                        )}
+
+                                        {}
                                         {editingOp && (
-                                            <div className="p-4 bg-slate-100 border border-slate-200 rounded-2xl space-y-3">
-                                                <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                                                    <i data-lucide="user-check" className="w-4 h-4 text-slate-500"></i>
-                                                    Tratativa do Almoxarifado
+                                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                                                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                                                    <i data-lucide="sliders" className="w-4 h-4"></i> Painel Operacional de Separação
                                                 </h4>
-                                                <div className="space-y-3">
-                                                    <div>
-                                                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Status da Separação *</label>
-                                                        <select 
-                                                            className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                                            value={formData.status} 
-                                                            onChange={e => setFormData({...formData, status: e.target.value})}
-                                                            disabled={userRole !== 'almoxarifado'}
-                                                        >
-                                                            {statusOptions.map(opt => (
-                                                                <option key={opt.id} value={opt.id}>{opt.label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Observações do Almoxarife</label>
-                                                        <textarea 
-                                                            rows="2" placeholder="Descreva os motivos de retenção..."
-                                                            className="w-full p-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                                            value={formData.notes} 
-                                                            onChange={e => setFormData({...formData, notes: e.target.value})}
-                                                            disabled={userRole !== 'almoxarifado'}
-                                                        ></textarea>
+                                                
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status da Separação *</label>
+                                                    <select 
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                                        value={formData.status} 
+                                                        onChange={e => setFormData({...formData, status: e.target.value})}
+                                                        disabled={userRole !== 'almoxarifado'}
+                                                    >
+                                                        {statusOptions.map(opt => (
+                                                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Faltas / Ocorrências / Motivo de Atrasos</label>
+                                                    <textarea 
+                                                        rows="2" placeholder="Descreva os aviamentos faltantes ou motivos de parada..."
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                                        value={formData.notes} 
+                                                        onChange={e => setFormData({...formData, notes: e.target.value})}
+                                                        disabled={userRole !== 'almoxarifado'}
+                                                    ></textarea>
+                                                </div>
+
+                                                {/* Checklist Físico Customizável da OP */}
+                                                <div className="border-t border-slate-200 pt-3">
+                                                    <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Checklist de Separação dos Itens</label>
+                                                    
+                                                    {userRole === 'almoxarifado' && (
+                                                        <form onSubmit={handleAddChecklistItem} className="flex gap-2 mb-3">
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Adicionar aviamento (Ex: Zíper 15cm)..."
+                                                                className="flex-1 p-2 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                                                                value={newChecklistItem}
+                                                                onChange={e => setNewChecklistItem(e.target.value)}
+                                                            />
+                                                            <button 
+                                                                type="button"
+                                                                onClick={handleAddChecklistItem}
+                                                                className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-3 rounded-lg font-bold flex items-center gap-1"
+                                                            >
+                                                                <i data-lucide="plus" className="w-4 h-4"></i> Inserir
+                                                            </button>
+                                                        </form>
+                                                    )}
+
+                                                    <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                                                        {(editingOp.items || []).map((item, index) => (
+                                                            <div key={index} className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100">
+                                                                <label className="flex items-center gap-2 cursor-pointer select-none text-xs flex-1">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                                                                        checked={item.checked}
+                                                                        onChange={() => handleToggleChecklistItem(index)}
+                                                                        disabled={userRole !== 'almoxarifado'}
+                                                                    />
+                                                                    <span className={item.checked ? 'line-through text-slate-400' : 'text-slate-700 font-semibold'}>
+                                                                        {item.name}
+                                                                    </span>
+                                                                </label>
+                                                                {userRole === 'almoxarifado' && (
+                                                                    <button 
+                                                                        type="button"
+                                                                        onClick={() => handleRemoveChecklistItem(index)}
+                                                                        className="text-red-400 hover:text-red-600 p-1"
+                                                                    >
+                                                                        <i data-lucide="trash-2" className="w-3.5 h-3.5"></i>
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                        {(editingOp.items || []).length === 0 && (
+                                                            <div className="text-center py-4 text-slate-400 text-xs italic bg-white rounded-lg border border-slate-100">
+                                                                {userRole === 'almoxarifado' ? 'Adicione acima as necessidades da OP.' : 'Nenhum item cadastrado pelo almoxarifado.'}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -914,12 +969,13 @@
                                     </form>
                                 </div>
                                 
-                                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-2xl">
-                                    <button type="button" onClick={handleCloseModal} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold transition-all">Cancelar</button>
+                                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
+                                    <button type="button" onClick={handleCloseModal} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-100 text-xs font-bold transition-all">Cancelar</button>
                                     
-                                    {((userRole === 'pcp' && !editingOp) || (userRole === 'almoxarifado' && editingOp)) && (
-                                        <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-semibold shadow-sm transition-all flex items-center gap-2 shadow-blue-100">
-                                            <i data-lucide="save" className="w-4 h-4"></i> Gravar Alterações
+                                    {/* Apenas exibe o botão Salvar se o usuário tiver as permissões devidas do respectivo perfil */}
+                                    {((userRole === 'pcp' && !editingOp) || (userRole === 'pcp' && editingOp) || (userRole === 'almoxarifado' && editingOp)) && (
+                                        <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-bold shadow-md shadow-blue-100 flex items-center gap-1.5 transition-all">
+                                            <i data-lucide="save" className="w-4 h-4"></i> Salvar Solicitação
                                         </button>
                                     )}
                                 </div>
@@ -927,34 +983,63 @@
                         </div>
                     )}
 
-                    {/* Rodapé Diagnóstico */}
-                    <footer className="bg-slate-900 text-slate-400 py-3 px-6 text-xs flex justify-between items-center border-t border-slate-800">
-                        <span>Fluxo de Aviamentos por OP &copy; 2026</span>
-                        <div className="flex items-center gap-2">
-                            {dbStatus === 'conectando' && (
-                                <span className="flex items-center gap-1.5 text-amber-400">
-                                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                                    Autenticando...
-                                </span>
-                            )}
-                            {dbStatus === 'online' && !permissionDeniedError && (
-                                <span className="flex items-center gap-1.5 text-emerald-400">
-                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                    Nuvem Conectada
-                                </span>
-                            )}
-                            {(dbStatus === 'offline' || permissionDeniedError) && (
-                                <span className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Utilizando dados locais (localStorage)">
-                                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                                    Contingência Local Ativa
-                                </span>
-                            )}
+                    {}
+                    {passwordModal.isOpen && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
+                                        <i data-lucide="shield-alert" className="w-4.5 h-4.5 text-red-500"></i> Autenticação PCP
+                                    </h3>
+                                    <button 
+                                        onClick={() => setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null })}
+                                        className="text-slate-400 hover:text-slate-600"
+                                    >
+                                        <i data-lucide="x" className="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleVerifyPassword} className="p-5 space-y-4">
+                                    <p className="text-xs text-slate-500">
+                                        Esta ação altera a estrutura original do PCP. Digite a senha master de liberação para prosseguir:
+                                    </p>
+                                    <div>
+                                        <input 
+                                            type="password" required autoFocus placeholder="Digite a senha..."
+                                            className="w-full p-2.5 border border-slate-200 rounded-xl text-center text-sm font-bold tracking-widest focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={passwordModal.password}
+                                            onChange={e => setPasswordModal({ ...passwordModal, password: e.target.value })}
+                                        />
+                                    </div>
+                                    {passwordModal.error && (
+                                        <div className="text-[10px] text-red-600 font-bold bg-red-50 p-2 rounded-lg text-center">
+                                            {passwordModal.error}
+                                        </div>
+                                    )}
+                                    <div className="flex gap-2">
+                                        <button 
+                                            type="button"
+                                            onClick={() => setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null })}
+                                            className="flex-1 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button 
+                                            type="submit"
+                                            className="flex-1 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold"
+                                        >
+                                            Confirmar
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
-                    </footer>
+                    )}
+
                 </div>
             );
         };
 
+        // Renderização Final da árvore React na raiz HTML
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
