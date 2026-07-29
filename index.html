@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Aviamentos por OP</title>
+    <title>Painel de Aviamentos por OP - Com Distribuição</title>
     
     <!-- Tailwind CSS para Estilização Premium -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,7 +15,7 @@
     <!-- Babel para Transpilação do JSX no Navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- SDKs do Firebase v9 em Modo de Compatibilidade (Essencial para rodar em arquivo único) -->
+    <!-- SDKs do Firebase v9 em Modo de Compatibilidade -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
@@ -23,8 +23,8 @@
     <!-- Lucide Icons para Iconografia Moderna -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Fonte Inter (Padrão Industrial de Leitura de Tela) -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Fonte Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
         body { 
@@ -47,7 +47,7 @@
         }
         @keyframes pulse-ring {
             0% { transform: scale(0.95); opacity: 1; }
-            50% { transform: scale(1.1); opacity: 0.5; }
+            50% { transform: scale(1.05); opacity: 0.6; }
             100% { transform: scale(0.95); opacity: 1; }
         }
         .pulse-priority {
@@ -61,7 +61,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Configuração Real do seu Firebase (Integrada)
+        // Configuração Real do seu Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyDE5W2dSh9bdsds_E8_5Cvrr0KE2IOlzpI",
             authDomain: "almoxvt.firebaseapp.com",
@@ -72,13 +72,22 @@
             measurementId: "G-CJRY2BQWRH"
         };
 
-        // Opções de status e cores padronizadas para o Chão de Fábrica
+        // Opções de status e cores padronizadas por etapa
         const statusOptions = [
-            { id: 'pendente', label: 'Pendente', color: 'bg-slate-100 text-slate-800 border-slate-300' },
-            { id: 'em_separacao', label: 'Em Separação', color: 'bg-blue-100 text-blue-800 border-blue-300' },
-            { id: 'aguardando_compra', label: 'Aguardando Compra', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
-            { id: 'parcial', label: 'Parcial (Faltam Itens)', color: 'bg-orange-100 text-orange-800 border-orange-300' },
-            { id: 'completo', label: 'Kit Completo Separado', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
+            { id: 'pendente', label: 'Pendente (PCP)', sector: 'pcp', color: 'bg-red-100 text-red-800 border-red-200', borderColor: 'border-red-500' },
+            { id: 'em_separacao', label: 'Em Separação', sector: 'almoxarifado', color: 'bg-orange-100 text-orange-800 border-orange-200', borderColor: 'border-orange-500' },
+            { id: 'aguardando_compra', label: 'Aguardando Compra', sector: 'almoxarifado', color: 'bg-pink-100 text-pink-800 border-pink-200', borderColor: 'border-pink-600' },
+            { id: 'parcial', label: 'Parcial (Faltam Itens)', sector: 'almoxarifado', color: 'bg-blue-100 text-blue-800 border-blue-200', borderColor: 'border-blue-500' },
+            { id: 'em_distribuicao', label: 'Em Distribuição', sector: 'distribuicao', color: 'bg-purple-100 text-purple-800 border-purple-200', borderColor: 'border-purple-500' },
+            { id: 'completo', label: 'Finalizado (Entregue)', sector: 'finalizado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', borderColor: 'border-emerald-500' }
+        ];
+
+        // Mapeamento das colunas do Kanban por Setor/Fase
+        const columnsConfig = [
+            { id: 'pcp', title: '1. PCP / Solicitados', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statuses: ['pendente'] },
+            { id: 'almoxarifado', title: '2. Almoxarifado (Separação)', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statuses: ['em_separacao', 'aguardando_compra', 'parcial'] },
+            { id: 'distribuicao', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statuses: ['em_distribuicao'] },
+            { id: 'finalizado', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statuses: ['completo'] }
         ];
 
         let db = null;
@@ -96,7 +105,7 @@
             console.warn("Falha ao inicializar o Firebase. Ativando contingência offline.", error);
         }
 
-        // Formatação de data amigável para o chão de fábrica
+        // Formatação de data amigável
         const formatDateTime = (dateString) => {
             if (!dateString) return '--';
             const date = new Date(dateString);
@@ -123,29 +132,56 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingOp, setEditingOp] = useState(null);
-            const [userRole, setUserRole] = useState('pcp'); 
-            const [dbStatus, setDbStatus] = useState('conectando'); // 'conectando', 'online', 'offline'
+            const [userRole, setUserRole] = useState('pcp'); // 'pcp', 'almoxarifado', 'distribuicao'
+            const [dbStatus, setDbStatus] = useState('conectando');
             const [authError, setAuthError] = useState(null);
             const [isAuthenticated, setIsAuthenticated] = useState(false);
             const [permissionDeniedError, setPermissionDeniedError] = useState(false);
 
-            // Controle de Segurança e Modal de Validação de Senha do PCP
-            const [passwordModal, setPasswordModal] = useState({ isOpen: false, type: '', password: '', error: '', actionData: null });
+            // Estado para o Modal de Histórico de Finalizados
+            const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+            const [historySearchTerm, setHistorySearchTerm] = useState('');
+            const [historyDateFilter, setHistoryDateFilter] = useState('all'); // 'all', '7days', '30days'
+
+            // Gerenciamento de Senhas Configuráveis por Setor/Fase
+            const [passwords, setPasswords] = useState(() => {
+                const saved = localStorage.getItem('ops_passwords');
+                return saved ? JSON.parse(saved) : { pcp: '123456', almoxarifado: '112233', distribuicao: '334455' };
+            });
+
+            // Modal de Configuração de Senhas
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [tempPasswords, setTempPasswords] = useState({ pcp: '', almoxarifado: '', distribuicao: '' });
+
+            // Modal de Validação de Senha de Transição de Fase
+            const [passwordModal, setPasswordModal] = useState({ 
+                isOpen: false, 
+                requiredRole: 'pcp', // 'pcp', 'almoxarifado', 'distribuicao'
+                actionType: '', 
+                password: '', 
+                error: '', 
+                actionData: null 
+            });
 
             // Form de criação/edição
             const [formData, setFormData] = useState({
                 opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
             });
 
-            // Gerenciador de itens rápidos do checklist no Almoxarifado
+            // Checklist do Almoxarifado
             const [newChecklistItem, setNewChecklistItem] = useState('');
 
-            // Efeito para sincronizar ícones do Lucide sempre que a árvore renderizar
             useEffect(() => {
                 if (window.lucide) {
                     window.lucide.createIcons();
                 }
             });
+
+            // Sincronizar Senhas com localStorage
+            const savePasswordsConfig = (newPasses) => {
+                setPasswords(newPasses);
+                localStorage.setItem('ops_passwords', JSON.stringify(newPasses));
+            };
 
             useEffect(() => {
                 if (!firebaseOnline || !auth) {
@@ -181,11 +217,10 @@
                         setOps(loadedOps);
                         setDbStatus('online');
                         setPermissionDeniedError(false);
-                        // Sincroniza cache local para contingência futura
                         localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
                     }, (error) => {
                         console.error("Erro ao ler banco de dados Firestore: ", error);
-                        if (error.message.includes('permissions') || error.code === 'permission-denied') {
+                        if (error.message && (error.message.includes('permissions') || error.code === 'permission-denied')) {
                             setPermissionDeniedError(true);
                         }
                         setDbStatus('offline');
@@ -195,14 +230,13 @@
                 return () => unsubscribe();
             }, [isAuthenticated]);
 
-            // Carregamento emergencial via LocalStorage
             const loadLocalData = () => {
                 const cached = localStorage.getItem('ops_aviamentos_cache');
                 if (cached) {
                     try {
                         setOps(JSON.parse(cached));
                     } catch (e) {
-                        console.error("Erro ao decodificar cache local de dados.", e);
+                        console.error("Erro ao decodificar cache local.", e);
                     }
                 }
             };
@@ -231,14 +265,11 @@
                 localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
             };
 
-            // Sugestão padrão automática de 24 horas úteis de SLA
             const getSuggestedSla = () => {
                 const date = new Date();
                 date.setHours(date.getHours() + 24);
-                // Formato ISO local compatível com input datetime-local
                 const tzOffset = date.getTimezoneOffset() * 60000;
-                const localISOTime = (new Date(date - tzOffset)).toISOString().slice(0, 16);
-                return localISOTime;
+                return (new Date(date - tzOffset)).toISOString().slice(0, 16);
             };
 
             const handleOpenModal = (op = null) => {
@@ -277,7 +308,6 @@
                 setEditingOp(null);
             };
 
-            // Conversor Inteligente de PDF para Armazenamento Base64 (Com limitador de 800KB para evitar estouro de banda)
             const handlePdfUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -288,8 +318,8 @@
                     return;
                 }
 
-                if (file.size > 800 * 1024) { // Limite estrito de 800KB
-                    alert("O arquivo PDF ultrapassou o limite máximo de segurança de 800KB. Reduza a resolução e anexe novamente!");
+                if (file.size > 800 * 1024) {
+                    alert("O arquivo PDF ultrapassou o limite de 800KB. Reduza o tamanho do arquivo.");
                     e.target.value = '';
                     return;
                 }
@@ -305,10 +335,11 @@
                 reader.readAsDataURL(file);
             };
 
-            const triggerPasswordCheck = (type, actionData = null) => {
+            const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
                 setPasswordModal({
                     isOpen: true,
-                    type: type,
+                    requiredRole: requiredRole,
+                    actionType: actionType,
                     password: '',
                     error: '',
                     actionData: actionData
@@ -317,22 +348,26 @@
 
             const handleVerifyPassword = (e) => {
                 e.preventDefault();
-                if (passwordModal.password !== '123456') {
-                    setPasswordModal(prev => ({ ...prev, error: 'Senha do PCP incorreta! Ação não autorizada.' }));
+                const requiredRole = passwordModal.requiredRole;
+                const correctPassword = passwords[requiredRole];
+
+                if (passwordModal.password !== correctPassword) {
+                    const roleNames = { pcp: 'PCP', almoxarifado: 'Almoxarifado', distribuicao: 'Distribuição' };
+                    setPasswordModal(prev => ({ 
+                        ...prev, 
+                        error: `Senha do setor de ${roleNames[requiredRole]} incorreta!` 
+                    }));
                     return;
                 }
 
-                // Senha Correta -> Executa a ação pendente
-                const action = passwordModal.type;
+                const action = passwordModal.actionType;
                 const data = passwordModal.actionData;
 
-                // Fecha modal de verificação
-                setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null });
+                setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null });
 
                 if (action === 'delete') {
                     executeDeleteOp(data.id);
                 } else if (action === 'allow_edit') {
-                    // Abre modo de edição irrestrito no formulário para o PCP
                     setEditingOp(data);
                     setFormData({
                         opNumber: data.opNumber || '',
@@ -347,6 +382,10 @@
                     });
                 } else if (action === 'save_edit') {
                     executeSaveOp(data);
+                } else if (action === 'confirm_separacao') {
+                    executeMoveToDistribicao(data);
+                } else if (action === 'confirm_distribuicao') {
+                    executeMoveToFinalizados(data);
                 }
             };
 
@@ -363,23 +402,40 @@
                 }
             };
 
+            // Mover do Almoxarifado -> Distribuição
+            const executeMoveToDistribicao = (opToMove) => {
+                const updatedOp = {
+                    ...opToMove,
+                    status: 'em_distribuicao',
+                    separationConfirmedAt: new Date().toISOString()
+                };
+                saveOpToDb(updatedOp);
+                handleCloseModal();
+            };
+
+            // Mover da Distribuição -> Finalizados
+            const executeMoveToFinalizados = (opToMove) => {
+                const updatedOp = {
+                    ...opToMove,
+                    status: 'completo',
+                    completedTime: new Date().toISOString()
+                };
+                saveOpToDb(updatedOp);
+                handleCloseModal();
+            };
+
             const handleSaveOp = (e) => {
                 e.preventDefault();
-                const now = new Date();
-                
-                // Formatação correta para salvar o prazo digitado
                 const formattedDeadline = new Date(formData.slaDeadline).toISOString();
 
                 if (editingOp) {
-                    // Se estivermos editando e for alteração de PCP, exige a senha para salvar
                     if (userRole === 'pcp') {
-                        triggerPasswordCheck('save_edit', { ...editingOp, ...formData, slaDeadline: formattedDeadline });
+                        triggerPasswordCheck('pcp', 'save_edit', { ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     } else {
-                        // Se for almoxarifado, salva direto (apenas status/observações/checklist estão liberados de qualquer forma)
                         executeSaveOp({ ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     }
                 } else {
-                    // Criar Nova OP (Sem senha necessária para criar do zero)
+                    // Criar Nova OP exige senha PCP se configurado, ou cria diretamente no setor PCP
                     const newOp = {
                         id: `sol-${Date.now()}`,
                         opNumber: formData.opNumber,
@@ -387,7 +443,7 @@
                         faccaoDestino: formData.faccaoDestino,
                         status: 'pendente',
                         notes: formData.notes,
-                        requestTime: now.toISOString(),
+                        requestTime: new Date().toISOString(),
                         slaDeadline: formattedDeadline,
                         completedTime: null,
                         isPriority: formData.isPriority,
@@ -401,13 +457,11 @@
             };
 
             const executeSaveOp = (opToSave) => {
-                const now = new Date();
                 let finalOp = { ...opToSave };
 
-                // Define carimbo de tempo caso mude para o status de 'completo'
-                if (opToSave.status === 'completo') {
-                    finalOp.completedTime = now.toISOString();
-                } else {
+                if (opToSave.status === 'completo' && !opToSave.completedTime) {
+                    finalOp.completedTime = new Date().toISOString();
+                } else if (opToSave.status !== 'completo') {
                     finalOp.completedTime = null;
                 }
 
@@ -422,51 +476,69 @@
 
                 const updatedOp = { ...editingOp, items: updatedItems };
                 setEditingOp(updatedOp);
-                saveOpToDb(updatedOp);
             };
 
             const handleAddChecklistItem = (e) => {
-                e.preventDefault();
+                if (e) e.preventDefault();
                 if (!newChecklistItem.trim() || !editingOp) return;
 
                 const updatedItems = [...(editingOp.items || []), { name: newChecklistItem.trim(), checked: false }];
                 const updatedOp = { ...editingOp, items: updatedItems };
-                
                 setEditingOp(updatedOp);
-                saveOpToDb(updatedOp);
                 setNewChecklistItem('');
             };
 
             const handleRemoveChecklistItem = (itemIndex) => {
                 if (!editingOp) return;
-                const updatedItems = (editingOp.items || []).filter((_, idx) => idx !== itemIndex);
+                const updatedItems = (editingOp.items || []).filter((_, i) => i !== itemIndex);
                 const updatedOp = { ...editingOp, items: updatedItems };
-                
                 setEditingOp(updatedOp);
-                saveOpToDb(updatedOp);
             };
 
-            // Regra de arquivamento automático após 24 horas de kit completo para liberar espaço visual
+            // Regra de arquivamento automático após 24 horas de concluído na tela principal
             const isCompletedAndOld = (op) => {
                 if (op.status !== 'completo' || !op.completedTime) return false;
                 const completedAt = new Date(op.completedTime).getTime();
                 const now = new Date().getTime();
-                const hoursPassed = (now - completedAt) / (1000 * 60 * 60);
-                return hoursPassed >= 24; 
+                return (now - completedAt) / (1000 * 60 * 60) >= 24; 
             };
 
             const visibleOps = ops.filter(op => !isCompletedAndOld(op));
 
-            // Filtro de buscas de topo
             const filteredOps = visibleOps.filter(op => 
                 (op.opNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (op.model || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (op.faccaoDestino || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
 
-            // KPIs unificados de controle
+            // Lista de todas as OPs finalizadas (para o modal de histórico)
+            const allCompletedOps = ops.filter(op => op.status === 'completo');
+
+            const filteredHistoryOps = allCompletedOps.filter(op => {
+                const matchesSearch = 
+                    (op.opNumber || '').toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+                    (op.model || '').toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+                    (op.faccaoDestino || '').toLowerCase().includes(historySearchTerm.toLowerCase());
+
+                if (!matchesSearch) return false;
+
+                if (historyDateFilter === '7days') {
+                    const completedDate = new Date(op.completedTime || op.requestTime);
+                    const diffDays = (new Date() - completedDate) / (1000 * 60 * 60 * 24);
+                    return diffDays <= 7;
+                } else if (historyDateFilter === '30days') {
+                    const completedDate = new Date(op.completedTime || op.requestTime);
+                    const diffDays = (new Date() - completedDate) / (1000 * 60 * 60 * 24);
+                    return diffDays <= 30;
+                }
+
+                return true;
+            }).sort((a, b) => new Date(b.completedTime || 0) - new Date(a.completedTime || 0));
+
+            // KPIs
             const totalOps = visibleOps.length;
             const completedOps = visibleOps.filter(op => op.status === 'completo').length;
+            const inDistribuicaoOps = visibleOps.filter(op => op.status === 'em_distribuicao').length;
             const pendingOps = totalOps - completedOps;
             const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && op.status !== 'completo').length;
 
@@ -474,23 +546,25 @@
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
                 const isLate = sla.status === 'late' && op.status !== 'completo';
 
+                // Encontra a configuração de cor do status correspondente
+                const currentStatusObj = statusOptions.find(s => s.id === op.status) || statusOptions[0];
+
                 return (
                     <div 
                         key={op.id} 
                         onClick={() => handleOpenModal(op)}
-                        className={`bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border-2 relative overflow-hidden mb-3 ${
+                        className={`bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border-2 relative overflow-hidden mb-3 ${currentStatusObj.borderColor} ${
                             op.isPriority 
-                            ? 'border-amber-400 bg-gradient-to-br from-amber-50/30 to-white shadow-amber-100/50' 
-                            : 'border-slate-100 hover:border-slate-300'
+                            ? 'bg-gradient-to-br from-amber-50/30 to-white shadow-amber-100/50' 
+                            : ''
                         }`}
                     >
-                        {/* Indicador de Prioridade Máxima */}
                         {op.isPriority && (
                             <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400"></div>
                         )}
 
-                        <div className="flex justify-between items-start mb-2">
-                            <div className="flex items-center gap-1.5">
+                        <div className="flex justify-between items-start mb-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                                 <h4 className="font-bold text-slate-800 text-sm">{op.opNumber}</h4>
                                 {op.isPriority && (
                                     <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
@@ -504,9 +578,18 @@
                                 ? 'bg-red-100 text-red-700 animate-pulse' 
                                 : op.status === 'completo' 
                                 ? 'bg-emerald-100 text-emerald-700' 
+                                : op.status === 'em_distribuicao'
+                                ? 'bg-purple-100 text-purple-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
                                 {sla.text}
+                            </span>
+                        </div>
+
+                        {/* Badge de Status Atual */}
+                        <div className="mb-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border inline-block ${currentStatusObj.color}`}>
+                                {currentStatusObj.label}
                             </span>
                         </div>
                         
@@ -525,14 +608,12 @@
                             </div>
                         </div>
 
-                        {/* Indicador se possui PDF anexo */}
                         {op.pdfBase64 && (
                             <div className="mt-1 mb-2 inline-flex items-center gap-1 text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">
                                 <i data-lucide="file-text" className="w-3 h-3"></i> Ficha Técnica PDF
                             </div>
                         )}
 
-                        {/* Barra de Progresso do Checklist de Separação */}
                         {op.items && op.items.length > 0 && (
                             <div className="mt-2">
                                 <div className="flex justify-between text-[10px] text-slate-500 mb-1 font-medium">
@@ -554,7 +635,6 @@
             return (
                 <div className="min-h-screen flex flex-col">
                     
-                    {/* Alerta inteligente de bloqueio de Referer (Domínio de Teste Bloqueado pelo GCP) */}
                     {authError && (authError.includes('requests-from-referer') || authError.includes('blocked')) && (
                         <div className="bg-blue-50 border-b border-blue-200 p-4">
                             <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -563,42 +643,11 @@
                                         <i data-lucide="lock" className="w-5 h-5"></i>
                                     </div>
                                     <div>
-                                        <h3 className="text-sm font-bold text-blue-900">Segurança Ativa: Chave de API Protegida</h3>
+                                        <h3 className="text-sm font-bold text-blue-900">Segurança Ativa</h3>
                                         <p className="text-xs text-blue-700 mt-0.5">
-                                            O Google bloqueou a conexão porque este ambiente de teste (Preview) não está autorizado nas credenciais do seu Google Cloud. 
-                                            <strong> Isso é excelente!</strong> Significa que suas restrições de segurança estão funcionando. O app ativou a <strong>Contingência Local</strong> para que você teste aqui normalmente.
+                                            O ambiente ativou a <strong>Contingência Local</strong> com sincronização automática no navegador.
                                         </p>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2.5 py-1 rounded-full">
-                                        Segurança OK
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Alerta inteligente de permissão de segurança do Firebase */}
-                    {permissionDeniedError && (
-                        <div className="bg-amber-50 border-b border-amber-200 p-4">
-                            <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                                <div className="flex items-start gap-3">
-                                    <div className="p-2 bg-amber-100 rounded-lg text-amber-800">
-                                        <i data-lucide="alert-triangle" className="w-5 h-5"></i>
-                                    </div>
-                                    <div>
-                                        <h3 className="text-sm font-bold text-amber-900">Modo de Operação Local Ativado</h3>
-                                        <p className="text-xs text-amber-700 mt-0.5">
-                                            As regras de segurança do seu banco Firestore no Modo Produção ainda estão bloqueando o tráfego externo. 
-                                            Para colocar em nuvem, acesse a aba <strong>Rules</strong> do seu console e mude para <code>allow read, write: if request.auth != null;</code>.
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-1 rounded-full">
-                                        Falta Configuração
-                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -607,38 +656,66 @@
                     {/* Header Principal */}
                     <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
                         <div className="flex items-center gap-3">
-                            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-100">
+                            <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-100">
                                 <i data-lucide="package" className="w-6 h-6"></i>
                             </div>
                             <div>
-                                <h1 className="text-lg font-bold text-slate-800 leading-tight">Almoxarifado Flow</h1>
-                                <p className="text-xs text-slate-400">Gestão de Aviamentos por OP</p>
+                                <h1 className="text-lg font-extrabold text-slate-800 leading-tight">Almoxarifado & Distribuição Flow</h1>
+                                <p className="text-xs text-slate-400">Gestão de Aviamentos, Separação e Entrega por OP</p>
                             </div>
                         </div>
 
                         <div className="flex flex-wrap gap-3 items-center w-full md:w-auto justify-end">
-                            {/* Chave de Atuação (PCP ou Almoxarifado) */}
+                            {/* Chave de Atuação por Setor */}
                             <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
                                 <button 
                                     onClick={() => setUserRole('pcp')}
-                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'pcp' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'pcp' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                                 >
-                                    <i data-lucide="layers" className="w-3.5 h-3.5"></i> PCP / Planejamento
+                                    <i data-lucide="layers" className="w-3.5 h-3.5"></i> PCP
                                 </button>
                                 <button 
                                     onClick={() => setUserRole('almoxarifado')}
-                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'almoxarifado' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'almoxarifado' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                                 >
                                     <i data-lucide="check-square" className="w-3.5 h-3.5"></i> Almoxarifado
                                 </button>
+                                <button 
+                                    onClick={() => setUserRole('distribuicao')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${userRole === 'distribuicao' ? 'bg-white shadow-sm text-purple-600' : 'text-slate-500 hover:text-slate-800'}`}
+                                >
+                                    <i data-lucide="truck" className="w-3.5 h-3.5"></i> Distribuição
+                                </button>
                             </div>
 
-                            {/* Input de Pesquisas */}
-                            <div className="relative w-full md:w-64">
+                            {/* Botão para Abrir Histórico de Finalizados */}
+                            <button 
+                                onClick={() => setIsHistoryOpen(true)}
+                                className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                                title="Consultar Histórico de OPs Finalizadas"
+                            >
+                                <i data-lucide="history" className="w-4 h-4 text-emerald-600"></i> 
+                                <span>Histórico ({allCompletedOps.length})</span>
+                            </button>
+
+                            {/* Botão de Configuração de Senhas */}
+                            <button 
+                                onClick={() => {
+                                    setTempPasswords(passwords);
+                                    setIsSettingsOpen(true);
+                                }}
+                                title="Configurar Senhas das Fases"
+                                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all flex items-center gap-1 text-xs font-semibold"
+                            >
+                                <i data-lucide="settings" className="w-4 h-4"></i> Senhas
+                            </button>
+
+                            {/* Input de Pesquisa Principal */}
+                            <div className="relative w-full md:w-56">
                                 <i data-lucide="search" className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
                                 <input 
                                     type="text" 
-                                    placeholder="Buscar OP, Modelo, Destino..." 
+                                    placeholder="Buscar OP, Modelo..." 
                                     className="pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none w-full"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -655,57 +732,59 @@
                         </div>
                     </header>
 
-                    {/* Grid de KPIs no Chão de Fábrica */}
+                    {/* Grid de KPIs */}
                     <main className="flex-1 p-6 flex flex-col">
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        {}
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 rounded-xl text-blue-600"><i data-lucide="file-text" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ativas na Fila</p><p className="text-xl font-extrabold text-slate-800">{totalOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ativas</p><p className="text-xl font-extrabold text-slate-800">{totalOps}</p></div>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-yellow-50 rounded-xl text-yellow-600"><i data-lucide="timer" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Pendentes</p><p className="text-xl font-extrabold text-slate-800">{pendingOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Em Separação</p><p className="text-xl font-extrabold text-slate-800">{pendingOps - inDistribuicaoOps}</p></div>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-purple-50 rounded-xl text-purple-600"><i data-lucide="truck" className="w-5 h-5"></i></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Distribuição</p><p className="text-xl font-extrabold text-slate-800">{inDistribuicaoOps}</p></div>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-red-50 rounded-xl text-red-600"><i data-lucide="alert-octagon" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atrasadas (SLA)</p><p className="text-xl font-extrabold text-slate-800">{lateOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atrasadas</p><p className="text-xl font-extrabold text-slate-800">{lateOps}</p></div>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600"><i data-lucide="check-circle-2" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Prontos / Saídos</p><p className="text-xl font-extrabold text-slate-800">{completedOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Finalizadas</p><p className="text-xl font-extrabold text-slate-800">{completedOps}</p></div>
                             </div>
                         </div>
 
-                        {/* Kanban Principal */}
+                        {}
                         <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
-                            <div className="flex gap-6 h-full items-start min-w-[1200px]">
+                            <div className="flex gap-6 h-full items-start min-w-[1280px]">
                                 
-                                {}
-                                {statusOptions.map(status => {
-                                    // Filtragem e ordenação estrita por prioridade e depois prazo
+                                {columnsConfig.map(col => {
                                     const colOps = filteredOps
-                                        .filter(op => op.status === status.id)
+                                        .filter(op => col.statuses.includes(op.status))
                                         .sort((a, b) => {
-                                            // Se um for prioridade e outro não, prioridade vai primeiro
                                             if (a.isPriority && !b.isPriority) return -1;
                                             if (!a.isPriority && b.isPriority) return 1;
-                                            // Se empatar na prioridade, ordena pelo prazo mais próximo primeiro
                                             return new Date(a.slaDeadline) - new Date(b.slaDeadline);
                                         });
 
                                     return (
-                                        <div key={status.id} className="w-80 flex flex-col bg-slate-50 border border-slate-200 rounded-2xl h-[calc(100vh-280px)] min-h-[450px]">
-                                            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-slate-100 rounded-t-2xl">
+                                        <div key={col.id} className={`w-80 flex flex-col border rounded-2xl h-[calc(100vh-280px)] min-h-[480px] ${col.color}`}>
+                                            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/80 rounded-t-2xl backdrop-blur-sm">
                                                 <h3 className="font-bold text-slate-700 text-xs flex items-center gap-2">
-                                                    <span className={`w-2.5 h-2.5 rounded-full ${status.color.split(' ')[0]}`}></span>
-                                                    {status.label}
+                                                    {col.title}
                                                 </h3>
-                                                <span className="bg-slate-200 text-slate-600 text-[10px] py-0.5 px-2 rounded-full font-bold">{colOps.length}</span>
+                                                <span className={`text-[10px] py-0.5 px-2 rounded-full font-bold ${col.badgeColor}`}>
+                                                    {colOps.length}
+                                                </span>
                                             </div>
                                             <div className="p-3 overflow-y-auto flex-1 custom-scrollbar">
                                                 {colOps.map(op => renderCard(op))}
                                                 {colOps.length === 0 && (
-                                                    <div className="text-center py-12 text-slate-400 text-xs border-2 border-dashed border-slate-200 rounded-xl bg-white/50">
+                                                    <div className="text-center py-12 text-slate-400 text-xs border-2 border-dashed border-slate-200/80 rounded-xl bg-white/40">
                                                         Nenhuma OP nesta etapa
                                                     </div>
                                                 )}
@@ -718,7 +797,7 @@
                         </div>
                     </main>
 
-                    {/* Rodapé Dinâmico com Indicador de Conexão */}
+                    {/* Footer */}
                     <footer className="bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center text-xs text-slate-400">
                         <div className="flex items-center gap-2">
                             <span className={`w-2.5 h-2.5 rounded-full ${
@@ -729,18 +808,20 @@
                             </span>
                         </div>
                         <div>
-                            <span className="font-bold text-slate-500 uppercase">Perfil Ativo: {userRole === 'pcp' ? 'PCP' : 'Almoxarifado'}</span>
+                            <span className="font-bold text-slate-600 uppercase">
+                                Setor Ativo: {userRole === 'pcp' ? 'PCP' : userRole === 'almoxarifado' ? 'Almoxarifado' : 'Distribuição'}
+                            </span>
                         </div>
                     </footer>
 
-                    {}
+                    {/* Modal de Detalhes da OP / Edição */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
                                 <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                     <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                                         <i data-lucide="edit-3" className="w-4 h-4"></i>
-                                        {editingOp ? `Gerenciar Solicitação: ${editingOp.opNumber}` : 'Nova Ordem de Aviamento'}
+                                        {editingOp ? `OP: ${editingOp.opNumber}` : 'Nova Ordem de Aviamento (PCP)'}
                                     </h2>
                                     <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                                         <i data-lucide="x" className="w-5 h-5"></i>
@@ -749,23 +830,23 @@
                                 
                                 <div className="p-6 overflow-y-auto flex-1 space-y-5">
                                     
-                                    {/* Botões de exclusão e edição sob controle PCP */}
+                                    {/* Exclusão sob controle PCP */}
                                     {editingOp && userRole === 'pcp' && (
                                         <div className="flex justify-between items-center p-3 bg-red-50 border border-red-100 rounded-xl">
                                             <div className="text-xs text-red-800">
-                                                <strong>Controle de Ciclo de Vida:</strong> Exclua ou gerencie o cadastro original desta solicitação.
+                                                <strong>Ações restritas PCP:</strong> Requer senha de validação.
                                             </div>
                                             <div className="flex gap-2">
                                                 <button 
                                                     type="button"
-                                                    onClick={() => triggerPasswordCheck('allow_edit', editingOp)}
+                                                    onClick={() => triggerPasswordCheck('pcp', 'allow_edit', editingOp)}
                                                     className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-xs font-bold rounded-lg hover:bg-red-100 flex items-center gap-1"
                                                 >
                                                     <i data-lucide="lock" className="w-3.5 h-3.5"></i> Liberar Edição
                                                 </button>
                                                 <button 
                                                     type="button"
-                                                    onClick={() => triggerPasswordCheck('delete', editingOp)}
+                                                    onClick={() => triggerPasswordCheck('pcp', 'delete', editingOp)}
                                                     className="px-3 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 flex items-center gap-1 shadow-sm"
                                                 >
                                                     <i data-lucide="trash-2" className="w-3.5 h-3.5"></i> Excluir OP
@@ -774,9 +855,51 @@
                                         </div>
                                     )}
 
+                                    {/* Ações Específicas de Transição de Etapas */}
+                                    {editingOp && (
+                                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                                <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> Avance a Fase da OP
+                                            </h4>
+                                            
+                                            {/* Transição 1: Almoxarifado confirma separação -> Manda para Distribuição */}
+                                            {editingOp.status !== 'em_distribuicao' && editingOp.status !== 'completo' && (
+                                                <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50/80 p-3 rounded-lg border border-blue-200 gap-2">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-blue-900">Confirmar Separação dos Aviamentos</p>
+                                                        <p className="text-[11px] text-blue-700">Conclui a separação no Almoxarifado e envia para a fila de Distribuição.</p>
+                                                    </div>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => triggerPasswordCheck('almoxarifado', 'confirm_separacao', editingOp)}
+                                                        className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap"
+                                                    >
+                                                        <i data-lucide="shield-check" className="w-4 h-4"></i> Confirmar Separação (Senha Almoxarifado)
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Transição 2: Distribuição finaliza entrega -> Manda para Finalizados */}
+                                            {editingOp.status === 'em_distribuicao' && (
+                                                <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50/80 p-3 rounded-lg border border-purple-200 gap-2">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-purple-900">Confirmar Entrega / Distribuição Concluída</p>
+                                                        <p className="text-[11px] text-purple-700">A OP foi entregue à facção/oficina de destino e será movida para Finalizados.</p>
+                                                    </div>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => triggerPasswordCheck('distribuicao', 'confirm_distribuicao', editingOp)}
+                                                        className="w-full sm:w-auto px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap"
+                                                    >
+                                                        <i data-lucide="check-circle" className="w-4 h-4"></i> Finalizar Distribuição (Senha Distribuição)
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <form id="opForm" onSubmit={handleSaveOp} className="space-y-4">
                                         
-                                        {/* Inputs bloqueados para o Almoxarifado para preservar consistência do PCP */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Número da OP *</label>
@@ -802,9 +925,9 @@
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fração / Facção de Destino *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Facção de Destino *</label>
                                                 <input 
-                                                    type="text" required placeholder="Ex: Oficina Estrela da Costura"
+                                                    type="text" required placeholder="Ex: Oficina Estrela"
                                                     className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
                                                     value={formData.faccaoDestino} 
                                                     onChange={e => setFormData({...formData, faccaoDestino: e.target.value})}
@@ -812,7 +935,7 @@
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data e Hora de Entrega (SLA) *</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Prazo de Entrega (SLA) *</label>
                                                 <input 
                                                     type="datetime-local" required
                                                     className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400"
@@ -823,7 +946,6 @@
                                             </div>
                                         </div>
 
-                                        {/* Upload de Ficha Técnica / PDF da OP */}
                                         {userRole === 'pcp' && !editingOp && (
                                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                                                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1 flex items-center gap-1.5">
@@ -843,7 +965,6 @@
                                             </div>
                                         )}
 
-                                        {/* Seletor de Prioridade do PCP */}
                                         {userRole === 'pcp' && !editingOp && (
                                             <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
                                                 <input 
@@ -854,12 +975,11 @@
                                                     onChange={e => setFormData({...formData, isPriority: e.target.checked})}
                                                 />
                                                 <label htmlFor="priorityCheckbox" className="text-xs font-bold text-amber-900 cursor-pointer flex items-center gap-1 select-none">
-                                                    <i data-lucide="zap" className="w-4 h-4 fill-amber-500 text-amber-500"></i> Marcar como PRIORIDADE MÁXIMA (Urgente)
+                                                    <i data-lucide="zap" className="w-4 h-4 fill-amber-500 text-amber-500"></i> Marcar como PRIORIDADE MÁXIMA
                                                 </label>
                                             </div>
                                         )}
 
-                                        {/* Botão de Visualização Dinâmica do PDF anexado */}
                                         {editingOp && editingOp.pdfBase64 && (
                                             <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex justify-between items-center">
                                                 <div className="text-xs text-blue-800 font-semibold flex items-center gap-1.5">
@@ -876,20 +996,18 @@
                                             </div>
                                         )}
 
-                                        {}
                                         {editingOp && (
                                             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
                                                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
-                                                    <i data-lucide="sliders" className="w-4 h-4"></i> Painel Operacional de Separação
+                                                    <i data-lucide="sliders" className="w-4 h-4"></i> Status Interno e Ocorrências
                                                 </h4>
                                                 
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status da Separação *</label>
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status Interno</label>
                                                     <select 
-                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                                                         value={formData.status} 
                                                         onChange={e => setFormData({...formData, status: e.target.value})}
-                                                        disabled={userRole !== 'almoxarifado'}
                                                     >
                                                         {statusOptions.map(opt => (
                                                             <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -898,17 +1016,16 @@
                                                 </div>
 
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Faltas / Ocorrências / Motivo de Atrasos</label>
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Observações / Ocorrências de Entrega</label>
                                                     <textarea 
-                                                        rows="2" placeholder="Descreva os aviamentos faltantes ou motivos de parada..."
-                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                                        rows="2" placeholder="Descreva observações de separação, itens faltantes ou detalhes de rota..."
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                                                         value={formData.notes} 
                                                         onChange={e => setFormData({...formData, notes: e.target.value})}
-                                                        disabled={userRole !== 'almoxarifado'}
                                                     ></textarea>
                                                 </div>
 
-                                                {/* Checklist Físico Customizável da OP */}
+                                                {/* Checklist Físico */}
                                                 <div className="border-t border-slate-200 pt-3">
                                                     <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Checklist de Separação dos Itens</label>
                                                     
@@ -959,7 +1076,7 @@
                                                         ))}
                                                         {(editingOp.items || []).length === 0 && (
                                                             <div className="text-center py-4 text-slate-400 text-xs italic bg-white rounded-lg border border-slate-100">
-                                                                {userRole === 'almoxarifado' ? 'Adicione acima as necessidades da OP.' : 'Nenhum item cadastrado pelo almoxarifado.'}
+                                                                Nenhum item cadastrado no checklist.
                                                             </div>
                                                         )}
                                                     </div>
@@ -970,55 +1087,203 @@
                                 </div>
                                 
                                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
-                                    <button type="button" onClick={handleCloseModal} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-100 text-xs font-bold transition-all">Cancelar</button>
+                                    <button type="button" onClick={handleCloseModal} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-100 text-xs font-bold transition-all">Fechar</button>
                                     
-                                    {/* Apenas exibe o botão Salvar se o usuário tiver as permissões devidas do respectivo perfil */}
-                                    {((userRole === 'pcp' && !editingOp) || (userRole === 'pcp' && editingOp) || (userRole === 'almoxarifado' && editingOp)) && (
-                                        <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-bold shadow-md shadow-blue-100 flex items-center gap-1.5 transition-all">
-                                            <i data-lucide="save" className="w-4 h-4"></i> Salvar Solicitação
-                                        </button>
-                                    )}
+                                    <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-bold shadow-md shadow-blue-100 flex items-center gap-1.5 transition-all">
+                                        <i data-lucide="save" className="w-4 h-4"></i> Salvar Registro
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     )}
 
                     {}
+                    {/* Modal de Histórico de OPs Finalizadas */}
+                    {isHistoryOpen && (
+                        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[85vh]">
+                                
+                                {/* Cabeçalho do Histórico */}
+                                <div className="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-slate-50">
+                                    <div>
+                                        <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                            <i data-lucide="archive" className="w-4 h-4 text-emerald-600"></i>
+                                            Histórico de Pedidos Finalizados ({allCompletedOps.length})
+                                        </h2>
+                                        <p className="text-xs text-slate-500 mt-0.5">Consulte OPs concluídas, fichas técnicas e relatórios de entrega</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => setIsHistoryOpen(false)} 
+                                        className="p-1 text-slate-400 hover:text-slate-600 transition-colors self-end md:self-auto"
+                                    >
+                                        <i data-lucide="x" className="w-5 h-5"></i>
+                                    </button>
+                                </div>
+
+                                {/* Barra de Filtro e Pesquisa do Histórico */}
+                                <div className="p-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-between">
+                                    <div className="relative w-full sm:w-80">
+                                        <i data-lucide="search" className="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Procurar por Nº de OP, Modelo, Facção..." 
+                                            className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={historySearchTerm}
+                                            onChange={(e) => setHistorySearchTerm(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                                        <span className="text-xs text-slate-500 font-semibold">Período:</span>
+                                        <select 
+                                            className="p-2 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500 outline-none bg-slate-50"
+                                            value={historyDateFilter}
+                                            onChange={(e) => setHistoryDateFilter(e.target.value)}
+                                        >
+                                            <option value="all">Todo o Histórico</option>
+                                            <option value="7days">Últimos 7 Dias</option>
+                                            <option value="30days">Últimos 30 Dias</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Listagem do Histórico em Tabela / Cards */}
+                                <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+                                    {filteredHistoryOps.length > 0 ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {filteredHistoryOps.map(op => {
+                                                const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
+                                                return (
+                                                    <div 
+                                                        key={op.id}
+                                                        className="bg-white border border-slate-200 hover:border-emerald-300 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                                                    >
+                                                        <div>
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="font-extrabold text-slate-800 text-sm">{op.opNumber}</span>
+                                                                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                                                                        <i data-lucide="check-circle-2" className="w-3 h-3"></i> Entregue
+                                                                    </span>
+                                                                </div>
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                                                    sla.status === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                                                }`}>
+                                                                    {sla.text}
+                                                                </span>
+                                                            </div>
+
+                                                            <p className="text-xs font-semibold text-slate-700 mb-1">{op.model}</p>
+                                                            <p className="text-xs text-slate-500 mb-3 flex items-center gap-1">
+                                                                <i data-lucide="truck" className="w-3.5 h-3.5 text-slate-400"></i> {op.faccaoDestino || 'Setor Interno'}
+                                                            </p>
+
+                                                            <div className="bg-slate-50 rounded-lg p-2.5 text-[11px] text-slate-500 space-y-1 mb-3 border border-slate-100">
+                                                                <div className="flex justify-between">
+                                                                    <span>Solicitado em:</span>
+                                                                    <span className="font-semibold text-slate-700">{formatDateTime(op.requestTime)}</span>
+                                                                </div>
+                                                                <div className="flex justify-between">
+                                                                    <span>Entregue em:</span>
+                                                                    <span className="font-semibold text-emerald-700">{formatDateTime(op.completedTime)}</span>
+                                                                </div>
+                                                                {op.notes && (
+                                                                    <div className="border-t border-slate-200 pt-1 mt-1 text-[10px] text-slate-600 italic">
+                                                                        "{op.notes}"
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex justify-between items-center border-t border-slate-100 pt-3 mt-2">
+                                                            {op.pdfBase64 ? (
+                                                                <a 
+                                                                    href={op.pdfBase64}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                                                                >
+                                                                    <i data-lucide="file-text" className="w-3.5 h-3.5"></i> Ficha Técnica PDF
+                                                                </a>
+                                                            ) : (
+                                                                <span className="text-[10px] text-slate-400 italic">Sem PDF anexado</span>
+                                                            )}
+
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setIsHistoryOpen(false);
+                                                                    handleOpenModal(op);
+                                                                }}
+                                                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1"
+                                                            >
+                                                                <i data-lucide="eye" className="w-3.5 h-3.5"></i> Ver Detalhes
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-16 text-slate-400">
+                                            <i data-lucide="search-x" className="w-10 h-10 mx-auto mb-2 text-slate-300"></i>
+                                            <p className="text-sm font-semibold">Nenhuma OP finalizada encontrada.</p>
+                                            <p className="text-xs text-slate-400 mt-1">Tente pesquisar com outro número de OP ou alterar o filtro de data.</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Rodapé do Histórico */}
+                                <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex justify-between items-center text-xs text-slate-500">
+                                    <span>Exibindo {filteredHistoryOps.length} de {allCompletedOps.length} OPs finalizadas</span>
+                                    <button 
+                                        onClick={() => setIsHistoryOpen(false)}
+                                        className="px-4 py-1.5 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all"
+                                    >
+                                        Fechar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Modal de Validação de Senha */}
                     {passwordModal.isOpen && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200">
                                 <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                                     <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                                        <i data-lucide="shield-alert" className="w-4.5 h-4.5 text-red-500"></i> Autenticação PCP
+                                        <i data-lucide="shield-alert" className="w-4.5 h-4.5 text-blue-600"></i> Autenticação por Senha
                                     </h3>
                                     <button 
-                                        onClick={() => setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null })}
+                                        onClick={() => setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null })}
                                         className="text-slate-400 hover:text-slate-600"
                                     >
                                         <i data-lucide="x" className="w-4 h-4"></i>
                                     </button>
                                 </div>
                                 <form onSubmit={handleVerifyPassword} className="p-5 space-y-4">
-                                    <p className="text-xs text-slate-500">
-                                        Esta ação altera a estrutura original do PCP. Digite a senha master de liberação para prosseguir:
+                                    <p className="text-xs text-slate-600">
+                                        Para confirmar esta ação, digite a senha configurada do setor de <strong className="text-blue-700 uppercase">{
+                                            passwordModal.requiredRole === 'pcp' ? 'PCP' : passwordModal.requiredRole === 'almoxarifado' ? 'Almoxarifado' : 'Distribuição'
+                                        }</strong>:
                                     </p>
                                     <div>
                                         <input 
-                                            type="password" required autoFocus placeholder="Digite a senha..."
+                                            type="password" required autoFocus placeholder="Digite a senha do setor..."
                                             className="w-full p-2.5 border border-slate-200 rounded-xl text-center text-sm font-bold tracking-widest focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={passwordModal.password}
                                             onChange={e => setPasswordModal({ ...passwordModal, password: e.target.value })}
                                         />
                                     </div>
                                     {passwordModal.error && (
-                                        <div className="text-[10px] text-red-600 font-bold bg-red-50 p-2 rounded-lg text-center">
+                                        <div className="text-[11px] text-red-600 font-bold bg-red-50 p-2.5 rounded-lg text-center border border-red-100">
                                             {passwordModal.error}
                                         </div>
                                     )}
                                     <div className="flex gap-2">
                                         <button 
                                             type="button"
-                                            onClick={() => setPasswordModal({ isOpen: false, type: '', password: '', error: '', actionData: null })}
+                                            onClick={() => setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null })}
                                             className="flex-1 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50"
                                         >
                                             Cancelar
@@ -1027,10 +1292,81 @@
                                             type="submit"
                                             className="flex-1 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold"
                                         >
-                                            Confirmar
+                                            Validar
                                         </button>
                                     </div>
                                 </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {isSettingsOpen && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
+                                        <i data-lucide="key" className="w-4.5 h-4.5 text-blue-600"></i> Configuração de Senhas por Setor
+                                    </h3>
+                                    <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                        <i data-lucide="x" className="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                                <div className="p-5 space-y-4">
+                                    <p className="text-xs text-slate-500">
+                                        Altere as senhas de liberação do PCP, Almoxarifado e Distribuição conforme necessário:
+                                    </p>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha PCP / Planejamento</label>
+                                        <input 
+                                            type="text" required
+                                            className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={tempPasswords.pcp}
+                                            onChange={e => setTempPasswords({ ...tempPasswords, pcp: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha Almoxarifado (Separação)</label>
+                                        <input 
+                                            type="text" required
+                                            className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={tempPasswords.almoxarifado}
+                                            onChange={e => setTempPasswords({ ...tempPasswords, almoxarifado: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-purple-900 uppercase mb-1">Senha Distribuição (Entrega)</label>
+                                        <input 
+                                            type="text" required
+                                            className="w-full p-2.5 border border-purple-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none bg-purple-50/20"
+                                            value={tempPasswords.distribuicao}
+                                            onChange={e => setTempPasswords({ ...tempPasswords, distribuicao: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div className="flex gap-2 pt-2">
+                                        <button 
+                                            type="button"
+                                            onClick={() => setIsSettingsOpen(false)}
+                                            className="flex-1 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button 
+                                            type="button"
+                                            onClick={() => {
+                                                savePasswordsConfig(tempPasswords);
+                                                setIsSettingsOpen(false);
+                                            }}
+                                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-100"
+                                        >
+                                            Salvar Senhas
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1039,7 +1375,6 @@
             );
         };
 
-        // Renderização Final da árvore React na raiz HTML
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
