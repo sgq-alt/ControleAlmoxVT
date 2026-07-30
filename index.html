@@ -698,7 +698,17 @@
                                 <span>Histórico ({allCompletedOps.length})</span>
                             </button>
 
-                          
+                            {/* Botão de Configuração de Senhas */}
+                            <button 
+                                onClick={() => {
+                                    setTempPasswords(passwords);
+                                    setIsSettingsOpen(true);
+                                }}
+                                title="Configurar Senhas das Fases"
+                                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all flex items-center gap-1 text-xs font-semibold"
+                            >
+                                <i data-lucide="settings" className="w-4 h-4"></i> Senhas
+                            </button>
 
                             {/* Input de Pesquisa Principal */}
                             <div className="relative w-full md:w-56">
