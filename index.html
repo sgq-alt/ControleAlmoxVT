@@ -1364,7 +1364,78 @@
                 </div>
             );
         };
+const ops = [
+  { id: "2631004", status: "Atrasado", motivoAtraso: "Falta de Material" },
+  { id: "2637010", status: "Atrasado", motivoAtraso: "Falta de Material" },
+  { id: "2640008", status: "Atrasado", motivoAtraso: "Problema na Máquina" },
+  { id: "2635043", status: "No Prazo", motivoAtraso: null }
+];
+        function calcularIndicadoresAtraso(listaOps) {
+  // 1. Filtrar apenas as OPs que estão atrasadas e possuem um motivo registrado
+  const opsAtrasadas = listaOps.filter(op => op.status === 'Atrasado');
+  const totalAtrasadas = opsAtrasadas.length;
 
+  if (totalAtrasadas === 0) {
+    return { totalAtrasadas: 0, percentuaisPorMotivo: {} };
+  }
+
+  // 2. Contar a quantidade por cada motivo
+  const contagemMotivos = opsAtrasadas.reduce((acc, op) => {
+    const motivo = op.motivoAtraso || 'Não Informado';
+    acc[motivo] = (acc[motivo] || 0) + 1;
+    return acc;
+  }, {});
+
+  // 3. Converter contagem em porcentagem
+  const percentuaisPorMotivo = {};
+  for (const [motivo, quantidade] of Object.entries(contagemMotivos)) {
+    const percentual = ((quantidade / totalAtrasadas) * 100).toFixed(1);
+    percentuaisPorMotivo[motivo] = {
+      quantidade,
+      percentual: Number(percentual)
+    };
+  }
+
+  return {
+    totalAtrasadas,
+    percentuaisPorMotivo
+  };
+}
+        function renderizarAbaIndicadores() {
+  const container = document.getElementById('view-indicadores');
+  const dados = calcularIndicadoresAtraso(ops); // passa a lista global de OPs
+
+  if (dados.totalAtrasadas === 0) {
+    container.innerHTML = '<h3>Nenhuma OP atrasada no momento! 🎉</h3>';
+    return;
+  }
+
+  let html = `
+    <div class="indicadores-header">
+      <h2>Indicadores de Atraso</h2>
+      <p>Total de OPs Atrasadas: <strong>${dados.totalAtrasadas}</strong></p>
+    </div>
+    <div class="cards-indicadores" style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 20px;">
+  `;
+
+  for (const [motivo, info] of Object.entries(dados.percentuaisPorMotivo)) {
+    html += `
+      <div class="card-indicador" style="border: 1px solid #e0e0e0; padding: 16px; border-radius: 8px; flex: 1; min-width: 200px; background: #fff;">
+        <span style="font-size: 0.9em; color: #666;">${motivo}</span>
+        <h3 style="font-size: 1.8em; margin: 8px 0; color: #d32f2f;">${info.percentual}%</h3>
+        <small style="color: #888;">${info.quantidade} OP(s)</small>
+        
+        <!-- Barra de Progresso Visual -->
+        <div style="background: #eee; height: 8px; border-radius: 4px; margin-top: 10px; overflow: hidden;">
+          <div style="background: #d32f2f; height: 100%; width: ${info.percentual}%;"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
