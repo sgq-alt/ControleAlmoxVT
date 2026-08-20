@@ -334,25 +334,24 @@ const storage = getStorage(app);
 const file = event.target.files[0];
 
 if (file) {
-  // 1. Cria uma referência única no Firebase Storage
-  const storageRef = ref(storage, 'fichas_tecnicas/' + Date.now() + '_' + file.name);
+  // Cria uma referência para salvar o arquivo no Storage
+  const ref = storage.ref('fichas_tecnicas/' + Date.now() + '_' + file.name);
 
-  // 2. Faz o upload do arquivo PDF
-  uploadBytes(storageRef, file).then(async (snapshot) => {
-    // 3. Pega a URL pública gerada
-    const downloadURL = await getDownloadURL(snapshot.ref);
-
-    // 4. Salva o LINK (downloadURL) no estado/dados do seu formulário
+  // Faz o upload do arquivo
+  ref.put(file).then(snapshot => {
+    // Pega o link público de acesso ao PDF
+    return snapshot.ref.getDownloadURL();
+  }).then(url => {
+    // Salva o LINK no seu formulário/objeto
     setFormData(prev => ({
       ...prev,
-      pdfBase64: downloadURL, // Guardando a URL pública no campo do PDF
+      pdfBase64: url, // Salva a URL para abrir no botão
       pdfName: file.name
     }));
-
-    alert("PDF carregado com sucesso!");
+    alert("PDF carregado e salvo com sucesso!");
   }).catch(error => {
     console.error("Erro no upload do PDF:", error);
-    alert("Erro ao enviar o PDF para o Storage.");
+    alert("Erro ao enviar o PDF.");
   });
 }
                     }));
