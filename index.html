@@ -19,8 +19,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
-    
+
     <!-- Lucide Icons para Iconografia Moderna -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -72,11 +71,7 @@
             appId: "1:688995393151:web:55ef061e6641f376b7294a",
             measurementId: "G-CJRY2BQWRH"
         };
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
-// ACRESCENTE ESTA LINHA AQUI:
-const storage = getStorage(app);
         // Opções de status e cores padronizadas por etapa
         const statusOptions = [
             { id: 'pendente', label: 'Pendente (PCP)', sector: 'pcp', color: 'bg-red-100 text-red-800 border-red-200', borderColor: 'border-red-500' },
@@ -330,30 +325,11 @@ const storage = getStorage(app);
                 }
 
                 const reader = new FileReader();
-                // Quando o usuário seleciona o PDF no input:
-const file = event.target.files[0];
-
-if (file) {
-  // Cria uma referência para salvar o arquivo no Storage
-  const ref = storage.ref('fichas_tecnicas/' + Date.now() + '_' + file.name);
-
-  // Faz o upload do arquivo
-  ref.put(file).then(snapshot => {
-    // Pega o link público de acesso ao PDF
-    return snapshot.ref.getDownloadURL();
-  }).then(url => {
-    // Salva o LINK no seu formulário/objeto
-    setFormData(prev => ({
-      ...prev,
-      pdfBase64: url, // Salva a URL para abrir no botão
-      pdfName: file.name
-    }));
-    alert("PDF carregado e salvo com sucesso!");
-  }).catch(error => {
-    console.error("Erro no upload do PDF:", error);
-    alert("Erro ao enviar o PDF.");
-  });
-}
+                reader.onload = () => {
+                    setFormData(prev => ({
+                        ...prev,
+                        pdfBase64: reader.result,
+                        pdfName: file.name
                     }));
                 };
                 reader.readAsDataURL(file);
