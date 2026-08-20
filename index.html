@@ -19,7 +19,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
 
     <!-- Lucide Icons para Iconografia Moderna -->
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -93,7 +92,6 @@
 
         let db = null;
         let auth = null;
-        let storage = null;
         let firebaseOnline = false;
 
         try {
@@ -102,7 +100,6 @@
             }
             db = firebase.firestore();
             auth = firebase.auth();
-            storage = firebase.storage();
             firebaseOnline = true;
         } catch (error) {
             console.warn("Falha ao inicializar o Firebase. Ativando contingência offline.", error);
@@ -154,9 +151,7 @@
 
             // Modal de Configuração de Senhas
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-            const [tempPasswords, setTempPasswords] = useState(() => ({ ...passwords }));
-            const [pdfFile, setPdfFile] = useState(null);
-            const [isSaving, setIsSaving] = useState(false);
+            const [tempPasswords, setTempPasswords] = useState({ pcp: '', almoxarifado: '', distribuicao: '' });
 
             // Modal de Validação de Senha de Transição de Fase
             const [passwordModal, setPasswordModal] = useState({ 
@@ -170,7 +165,7 @@
 
             // Form de criação/edição
             const [formData, setFormData] = useState({
-                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfUrl: '', pdfName: ''
+                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
             });
 
             // Checklist do Almoxarifado
@@ -184,76 +179,8 @@
 
             // Sincronizar Senhas com localStorage
             const savePasswordsConfig = (newPasses) => {
-                const sanitized = {
-                    pcp: String(newPasses.pcp || '').trim(),
-                    almoxarifado: String(newPasses.almoxarifado || '').trim(),
-                    distribuicao: String(newPasses.distribuicao || '').trim()
-                };
-                if (!sanitized.pcp || !sanitized.almoxarifado || !sanitized.distribuicao) {
-                    alert('Todas as senhas precisam ser preenchidas.');
-                    return false;
-                }
-                setPasswords(sanitized);
-                localStorage.setItem('ops_passwords', JSON.stringify(sanitized));
-                return true;
-            };
-
-            const getPendingSync = () => {
-                try { return JSON.parse(localStorage.getItem('ops_pending_sync') || '[]'); }
-                catch { return []; }
-            };
-
-            const setPendingSync = (queue) => localStorage.setItem('ops_pending_sync', JSON.stringify(queue));
-
-            const queueSync = (action) => {
-                const queue = getPendingSync();
-                const filtered = queue.filter(item => item.id !== action.id || (action.type === 'upsert' && item.type === 'upsert'));
-                filtered.push(action);
-                setPendingSync(filtered);
-            };
-
-            const dataUrlToBlob = (dataUrl) => {
-                const [header, data] = dataUrl.split(',');
-                const mime = (header.match(/:(.*?);/) || [,'application/pdf'])[1];
-                const binary = atob(data);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                return new Blob([bytes], { type: mime });
-            };
-
-            const uploadPdfToStorage = async (opId, fileOrDataUrl, fileName) => {
-                if (!storage) throw new Error('Firebase Storage não está disponível.');
-                const safeName = String(fileName || 'ficha_tecnica.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-                const ref = storage.ref().child(`ops_aviamentos/${opId}/${Date.now()}_${safeName}`);
-                const source = typeof fileOrDataUrl === 'string' ? dataUrlToBlob(fileOrDataUrl) : fileOrDataUrl;
-                await ref.put(source, { contentType: 'application/pdf' });
-                return await ref.getDownloadURL();
-            };
-
-            const syncPendingOperations = async () => {
-                if (!db || !storage) return;
-                const queue = getPendingSync();
-                if (!queue.length) return;
-                const remaining = [];
-                for (const action of queue) {
-                    try {
-                        if (action.type === 'delete') {
-                            await db.collection('ops_aviamentos').doc(action.id).delete();
-                        } else if (action.type === 'upsert') {
-                            let op = { ...action.op };
-                            if (op.pdfPendingUpload && op.pdfBase64) {
-                                op.pdfUrl = await uploadPdfToStorage(op.id, op.pdfBase64, op.pdfName);
-                                op.pdfPendingUpload = false;
-                                delete op.pdfBase64;
-                            }
-                            await db.collection('ops_aviamentos').doc(op.id).set(op);
-                        }
-                    } catch (err) {
-                        console.error('Falha ao sincronizar item pendente:', err);
-                        remaining.push(action);
-                    }
-                }
-                setPendingSync(remaining);
+                setPasswords(newPasses);
+                localStorage.setItem('ops_passwords', JSON.stringify(newPasses));
             };
 
             useEffect(() => {
@@ -282,25 +209,15 @@
                 setDbStatus('conectando');
                 
                 const unsubscribe = db.collection('ops_aviamentos')
-                    .onSnapshot(async (snapshot) => {
+                    .onSnapshot((snapshot) => {
                         const loadedOps = [];
                         snapshot.forEach(doc => {
                             loadedOps.push({ id: doc.id, ...doc.data() });
                         });
+                        setOps(loadedOps);
                         setDbStatus('online');
                         setPermissionDeniedError(false);
-
-                        const pending = getPendingSync();
-                        const pendingUpserts = pending.filter(x => x.type === 'upsert').map(x => x.op);
-                        const pendingDeletes = new Set(pending.filter(x => x.type === 'delete').map(x => x.id));
-                        const merged = loadedOps
-                            .filter(op => !pendingDeletes.has(op.id))
-                            .map(op => pendingUpserts.find(p => p.id === op.id) || op);
-                        pendingUpserts.forEach(p => { if (!merged.some(op => op.id === p.id)) merged.push(p); });
-
-                        setOps(merged);
-                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(merged));
-                        await syncPendingOperations();
+                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
                     }, (error) => {
                         console.error("Erro ao ler banco de dados Firestore: ", error);
                         if (error.message && (error.message.includes('permissions') || error.code === 'permission-denied')) {
@@ -324,37 +241,26 @@
                 }
             };
 
-            const saveOpToDb = async (updatedOp) => {
+            const saveOpToDb = (updatedOp) => {
                 if (dbStatus === 'online' && db) {
-                    try {
-                        let opToSave = { ...updatedOp };
-                        if (opToSave.pdfPendingUpload && opToSave.pdfBase64) {
-                            opToSave.pdfUrl = await uploadPdfToStorage(opToSave.id, opToSave.pdfBase64, opToSave.pdfName);
-                            opToSave.pdfPendingUpload = false;
-                            delete opToSave.pdfBase64;
-                        }
-                        await db.collection('ops_aviamentos').doc(opToSave.id).set(opToSave);
-                        updateLocalState(opToSave);
-                        const queue = getPendingSync().filter(item => !(item.type === 'upsert' && item.id === opToSave.id));
-                        setPendingSync(queue);
-                        return opToSave;
-                    } catch (err) {
-                        console.error('Erro ao salvar dados na nuvem, mantendo pendência local.', err);
-                        queueSync({ type: 'upsert', id: updatedOp.id, op: updatedOp });
-                        updateLocalState(updatedOp);
-                        return updatedOp;
-                    }
+                    db.collection('ops_aviamentos').doc(updatedOp.id).set(updatedOp)
+                        .catch(err => {
+                            console.error("Erro ao salvar dados na nuvem, aplicando localmente.", err);
+                            updateLocalState(updatedOp);
+                        });
+                } else {
+                    updateLocalState(updatedOp);
                 }
-                queueSync({ type: 'upsert', id: updatedOp.id, op: updatedOp });
-                updateLocalState(updatedOp);
-                return updatedOp;
             };
 
             const updateLocalState = (updatedOp) => {
                 const exist = ops.some(o => o.id === updatedOp.id);
-                const newOps = exist
-                    ? ops.map(o => o.id === updatedOp.id ? updatedOp : o)
-                    : [...ops, updatedOp];
+                let newOps = [];
+                if (exist) {
+                    newOps = ops.map(o => o.id === updatedOp.id ? updatedOp : o);
+                } else {
+                    newOps = [...ops, updatedOp];
+                }
                 setOps(newOps);
                 localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
             };
@@ -378,7 +284,6 @@
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: op.isPriority || false,
                         pdfBase64: op.pdfBase64 || '',
-                        pdfUrl: op.pdfUrl || '',
                         pdfName: op.pdfName || ''
                     });
                 } else {
@@ -392,11 +297,9 @@
                         slaDeadline: getSuggestedSla(),
                         isPriority: false,
                         pdfBase64: '',
-                        pdfUrl: '',
                         pdfName: ''
                     });
                 }
-                setPdfFile(null);
                 setIsModalOpen(true);
             };
 
@@ -409,29 +312,28 @@
                 const file = e.target.files[0];
                 if (!file) return;
 
-                if (file.type !== 'application/pdf') {
-                    alert('Apenas arquivos no formato PDF são aceitos!');
+                if (file.type !== "application/pdf") {
+                    alert("Apenas arquivos no formato PDF são aceitos!");
                     e.target.value = '';
                     return;
                 }
 
-                const maxSize = 10 * 1024 * 1024;
-                if (file.size > maxSize) {
-                    alert('O arquivo PDF ultrapassou o limite de 10 MB.');
+                if (file.size > 800 * 1024) {
+                    alert("O arquivo PDF ultrapassou o limite de 800KB. Reduza o tamanho do arquivo.");
                     e.target.value = '';
                     return;
                 }
 
-                setPdfFile(file);
-                setFormData(prev => ({ ...prev, pdfName: file.name, pdfBase64: '', pdfUrl: '' }));
-            };
-
-            const fileToDataUrl = (file) => new Promise((resolve, reject) => {
                 const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
+                reader.onload = () => {
+                    setFormData(prev => ({
+                        ...prev,
+                        pdfBase64: reader.result,
+                        pdfName: file.name
+                    }));
+                };
                 reader.readAsDataURL(file);
-            });
+            };
 
             const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
                 setPasswordModal({
@@ -463,10 +365,7 @@
 
                 setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null });
 
-                if (action === 'configure_passwords') {
-                    setTempPasswords({ ...passwords });
-                    setIsSettingsOpen(true);
-                } else if (action === 'delete') {
+                if (action === 'delete') {
                     executeDeleteOp(data.id);
                 } else if (action === 'allow_edit') {
                     setEditingOp(data);
@@ -479,7 +378,6 @@
                         slaDeadline: data.slaDeadline ? data.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: data.isPriority || false,
                         pdfBase64: data.pdfBase64 || '',
-                        pdfUrl: data.pdfUrl || '',
                         pdfName: data.pdfName || ''
                     });
                 } else if (action === 'save_edit') {
@@ -491,23 +389,17 @@
                 }
             };
 
-            const executeDeleteOp = async (opId) => {
+            const executeDeleteOp = (opId) => {
                 if (dbStatus === 'online' && db) {
-                    try {
-                        await db.collection('ops_aviamentos').doc(opId).delete();
-                    } catch (err) {
-                        queueSync({ type: 'delete', id: opId });
-                        const newOps = ops.filter(o => o.id !== opId);
-                        setOps(newOps);
-                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
-                    }
+                    db.collection('ops_aviamentos').doc(opId).delete()
+                        .then(() => handleCloseModal())
+                        .catch(err => console.error("Erro ao deletar OP na nuvem: ", err));
                 } else {
-                    queueSync({ type: 'delete', id: opId });
                     const newOps = ops.filter(o => o.id !== opId);
                     setOps(newOps);
                     localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+                    handleCloseModal();
                 }
-                handleCloseModal();
             };
 
             // Mover do Almoxarifado -> Distribuição
@@ -532,89 +424,48 @@
                 handleCloseModal();
             };
 
-            const canChangeStatus = (from, to, role) => {
-                if (!from || from === to) return true;
-                if (role === 'pcp') return to === 'pendente';
-                if (role === 'almoxarifado') {
-                    const allowed = ['pendente', 'em_separacao', 'aguardando_compra', 'parcial'];
-                    return allowed.includes(from) && allowed.includes(to);
-                }
-                if (role === 'distribuicao') return from === 'em_distribuicao' && to === 'em_distribuicao';
-                return false;
-            };
-
-            const handleSaveOp = async (e) => {
+            const handleSaveOp = (e) => {
                 e.preventDefault();
-                if (isSaving) return;
-                setIsSaving(true);
-                try {
-                    const formattedDeadline = formData.slaDeadline ? new Date(formData.slaDeadline).toISOString() : null;
-                    let pdfUrl = formData.pdfUrl || '';
-                    let pdfBase64 = formData.pdfBase64 || '';
-                    let pdfPendingUpload = false;
+                const formattedDeadline = new Date(formData.slaDeadline).toISOString();
 
-                    if (pdfFile) {
-                        if (!(dbStatus === 'online' && storage) && pdfFile.size > 2 * 1024 * 1024) {
-                            alert('Sem conexão com o Firebase, o PDF precisa ter no máximo 2 MB para permanecer disponível localmente até a sincronização.');
-                            return;
-                        }
-                        if (dbStatus === 'online' && storage) {
-                            pdfUrl = await uploadPdfToStorage(editingOp?.id || `sol-${Date.now()}`, pdfFile, pdfFile.name);
-                            pdfBase64 = '';
-                        } else {
-                            pdfBase64 = await fileToDataUrl(pdfFile);
-                            pdfPendingUpload = true;
-                        }
-                    }
-
-                    if (editingOp) {
-                        const proposed = { ...editingOp, ...formData, slaDeadline: formattedDeadline, pdfUrl, pdfBase64, pdfPendingUpload };
-                        if (!canChangeStatus(editingOp.status, proposed.status, userRole)) {
-                            alert('Esta alteração de status não é permitida para o setor atual. Use o botão de avanço de etapa com a senha do setor responsável.');
-                            return;
-                        }
-                        if (userRole === 'pcp') {
-                            triggerPasswordCheck('pcp', 'save_edit', proposed);
-                        } else {
-                            await executeSaveOp(proposed);
-                        }
+                if (editingOp) {
+                    if (userRole === 'pcp') {
+                        triggerPasswordCheck('pcp', 'save_edit', { ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     } else {
-                        const newOp = {
-                            id: `sol-${Date.now()}`,
-                            opNumber: formData.opNumber,
-                            model: formData.model,
-                            faccaoDestino: formData.faccaoDestino,
-                            status: 'pendente',
-                            notes: formData.notes,
-                            requestTime: new Date().toISOString(),
-                            slaDeadline: formattedDeadline,
-                            completedTime: null,
-                            isPriority: formData.isPriority,
-                            pdfBase64,
-                            pdfUrl,
-                            pdfName: formData.pdfName,
-                            pdfPendingUpload,
-                            items: []
-                        };
-                        await saveOpToDb(newOp);
-                        handleCloseModal();
+                        executeSaveOp({ ...editingOp, ...formData, slaDeadline: formattedDeadline });
                     }
-                } catch (err) {
-                    console.error(err);
-                    alert('Não foi possível salvar a OP: ' + (err.message || err));
-                } finally {
-                    setIsSaving(false);
+                } else {
+                    // Criar Nova OP exige senha PCP se configurado, ou cria diretamente no setor PCP
+                    const newOp = {
+                        id: `sol-${Date.now()}`,
+                        opNumber: formData.opNumber,
+                        model: formData.model,
+                        faccaoDestino: formData.faccaoDestino,
+                        status: 'pendente',
+                        notes: formData.notes,
+                        requestTime: new Date().toISOString(),
+                        slaDeadline: formattedDeadline,
+                        completedTime: null,
+                        isPriority: formData.isPriority,
+                        pdfBase64: formData.pdfBase64,
+                        pdfName: formData.pdfName,
+                        items: []
+                    };
+                    saveOpToDb(newOp);
+                    handleCloseModal();
                 }
             };
 
-            const executeSaveOp = async (opToSave) => {
+            const executeSaveOp = (opToSave) => {
                 let finalOp = { ...opToSave };
-                if (finalOp.status === 'completo' && !finalOp.completedTime) {
+
+                if (opToSave.status === 'completo' && !opToSave.completedTime) {
                     finalOp.completedTime = new Date().toISOString();
-                } else if (finalOp.status !== 'completo') {
+                } else if (opToSave.status !== 'completo') {
                     finalOp.completedTime = null;
                 }
-                await saveOpToDb(finalOp);
+
+                saveOpToDb(finalOp);
                 handleCloseModal();
             };
 
@@ -757,7 +608,7 @@
                             </div>
                         </div>
 
-                        {(op.pdfUrl || op.pdfBase64) && (
+                        {op.pdfBase64 && (
                             <div className="mt-1 mb-2 inline-flex items-center gap-1 text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">
                                 <i data-lucide="file-text" className="w-3 h-3"></i> Ficha Técnica PDF
                             </div>
@@ -848,16 +699,6 @@
                             </button>
 
                           
-
-                            {userRole === 'pcp' && (
-                                <button
-                                    onClick={() => triggerPasswordCheck('pcp', 'configure_passwords', null)}
-                                    className="px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-700 transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm"
-                                    title="Configurar senhas dos setores"
-                                >
-                                    <i data-lucide="key-round" className="w-4 h-4"></i> Senhas
-                                </button>
-                            )}
 
                             {/* Input de Pesquisa Principal */}
                             <div className="relative w-full md:w-56">
@@ -1098,7 +939,7 @@
                                         {userRole === 'pcp' && !editingOp && (
                                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                                                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1 flex items-center gap-1.5">
-                                                    <i data-lucide="file-plus" className="w-4 h-4"></i> Anexar PDF da OP / Ficha Técnica (armazenado no Firebase Storage)
+                                                    <i data-lucide="file-plus" className="w-4 h-4"></i> Anexar PDF da OP / Ficha Técnica (Max 800KB)
                                                 </label>
                                                 <input 
                                                     type="file" 
@@ -1129,13 +970,13 @@
                                             </div>
                                         )}
 
-                                        {editingOp && (editingOp.pdfUrl || editingOp.pdfBase64) && (
+                                        {editingOp && editingOp.pdfBase64 && (
                                             <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex justify-between items-center">
                                                 <div className="text-xs text-blue-800 font-semibold flex items-center gap-1.5">
                                                     <i data-lucide="file-text" className="w-4 h-4"></i> {editingOp.pdfName || "Ficha_Tecnica.pdf"}
                                                 </div>
                                                 <a 
-                                                    href={editingOp.pdfUrl || editingOp.pdfBase64} 
+                                                    href={editingOp.pdfBase64} 
                                                     target="_blank" 
                                                     rel="noopener noreferrer"
                                                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm transition-all"
@@ -1154,16 +995,13 @@
                                                 <div>
                                                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status Interno</label>
                                                     <select 
-                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100"
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                                                         value={formData.status} 
-                                                        disabled={userRole === 'distribuicao' || formData.status === 'em_distribuicao' || formData.status === 'completo'}
                                                         onChange={e => setFormData({...formData, status: e.target.value})}
                                                     >
-                                                        {statusOptions
-                                                            .filter(opt => userRole === 'pcp' ? opt.id === 'pendente' : userRole === 'almoxarifado' ? ['pendente','em_separacao','aguardando_compra','parcial'].includes(opt.id) : opt.id === 'em_distribuicao')
-                                                            .map(opt => (
-                                                                <option key={opt.id} value={opt.id}>{opt.label}</option>
-                                                            ))}
+                                                        {statusOptions.map(opt => (
+                                                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                        ))}
                                                     </select>
                                                 </div>
 
@@ -1182,7 +1020,7 @@
                                                     <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Checklist de Separação dos Itens</label>
                                                     
                                                     {userRole === 'almoxarifado' && (
-                                                        <div className="flex gap-2 mb-3">
+                                                        <form onSubmit={handleAddChecklistItem} className="flex gap-2 mb-3">
                                                             <input 
                                                                 type="text" 
                                                                 placeholder="Adicionar aviamento (Ex: Zíper 15cm)..."
@@ -1197,7 +1035,7 @@
                                                             >
                                                                 <i data-lucide="plus" className="w-4 h-4"></i> Inserir
                                                             </button>
-                                                        </div>
+                                                        </form>
                                                     )}
 
                                                     <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
@@ -1348,9 +1186,9 @@
                                                         </div>
 
                                                         <div className="flex justify-between items-center border-t border-slate-100 pt-3 mt-2">
-                                                            {(op.pdfUrl || op.pdfBase64) ? (
+                                                            {op.pdfBase64 ? (
                                                                 <a 
-                                                                    href={op.pdfUrl || op.pdfBase64}
+                                                                    href={op.pdfBase64}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
                                                                     className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
@@ -1444,7 +1282,7 @@
                                             type="submit"
                                             className="flex-1 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold"
                                         >
-                                            {isSaving ? 'Salvando...' : 'Validar'}
+                                            Validar
                                         </button>
                                     </div>
                                 </form>
@@ -1472,7 +1310,7 @@
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha PCP / Planejamento</label>
                                         <input 
-                                            type="password" required
+                                            type="text" required
                                             className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={tempPasswords.pcp}
                                             onChange={e => setTempPasswords({ ...tempPasswords, pcp: e.target.value })}
@@ -1482,7 +1320,7 @@
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha Almoxarifado (Separação)</label>
                                         <input 
-                                            type="password" required
+                                            type="text" required
                                             className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={tempPasswords.almoxarifado}
                                             onChange={e => setTempPasswords({ ...tempPasswords, almoxarifado: e.target.value })}
@@ -1510,7 +1348,8 @@
                                         <button 
                                             type="button"
                                             onClick={() => {
-                                                if (savePasswordsConfig(tempPasswords)) setIsSettingsOpen(false);
+                                                savePasswordsConfig(tempPasswords);
+                                                setIsSettingsOpen(false);
                                             }}
                                             className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-100"
                                         >
