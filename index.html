@@ -19,6 +19,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
 
     <!-- Lucide Icons para Iconografia Moderna -->
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -92,6 +93,7 @@
 
         let db = null;
         let auth = null;
+        let storage = null;
         let firebaseOnline = false;
 
         try {
@@ -100,6 +102,7 @@
             }
             db = firebase.firestore();
             auth = firebase.auth();
+            storage = firebase.storage();
             firebaseOnline = true;
         } catch (error) {
             console.warn("Falha ao inicializar o Firebase. Ativando contingência offline.", error);
@@ -151,7 +154,10 @@
 
             // Modal de Configuração de Senhas
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-            const [tempPasswords, setTempPasswords] = useState({ pcp: '', almoxarifado: '', distribuicao: '' });
+            const [tempPasswords, setTempPasswords] = useState(() => ({ ...passwords }));
+            const [pdfFile, setPdfFile] = useState(null);
+            const [isSaving, setIsSaving] = useState(false);
+            const pendingPdfFilesRef = useRef(new Map());
 
             // Modal de Validação de Senha de Transição de Fase
             const [passwordModal, setPasswordModal] = useState({ 
@@ -165,7 +171,7 @@
 
             // Form de criação/edição
             const [formData, setFormData] = useState({
-                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
+                opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfUrl: '', pdfName: ''
             });
 
             // Checklist do Almoxarifado
@@ -179,8 +185,80 @@
 
             // Sincronizar Senhas com localStorage
             const savePasswordsConfig = (newPasses) => {
-                setPasswords(newPasses);
-                localStorage.setItem('ops_passwords', JSON.stringify(newPasses));
+                const sanitized = {
+                    pcp: String(newPasses.pcp || '').trim(),
+                    almoxarifado: String(newPasses.almoxarifado || '').trim(),
+                    distribuicao: String(newPasses.distribuicao || '').trim()
+                };
+                if (!sanitized.pcp || !sanitized.almoxarifado || !sanitized.distribuicao) {
+                    alert('Todas as senhas precisam ser preenchidas.');
+                    return false;
+                }
+                setPasswords(sanitized);
+                localStorage.setItem('ops_passwords', JSON.stringify(sanitized));
+                return true;
+            };
+
+            const getPendingSync = () => {
+                try { return JSON.parse(localStorage.getItem('ops_pending_sync') || '[]'); }
+                catch { return []; }
+            };
+
+            const setPendingSync = (queue) => localStorage.setItem('ops_pending_sync', JSON.stringify(queue));
+
+            const queueSync = (action) => {
+                const queue = getPendingSync();
+                const filtered = queue.filter(item => !(item.id === action.id && item.type === action.type));
+                filtered.push(action);
+                try {
+                    setPendingSync(filtered);
+                } catch (e) {
+                    console.warn('Não foi possível manter a fila offline no navegador:', e);
+                }
+            };
+
+            const dataUrlToBlob = (dataUrl) => {
+                const [header, data] = dataUrl.split(',');
+                const mime = (header.match(/:(.*?);/) || [,'application/pdf'])[1];
+                const binary = atob(data);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return new Blob([bytes], { type: mime });
+            };
+
+            const uploadPdfToStorage = async (opId, fileOrDataUrl, fileName) => {
+                if (!storage) throw new Error('Firebase Storage não está disponível.');
+                const safeName = String(fileName || 'ficha_tecnica.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+                const ref = storage.ref().child(`ops_aviamentos/${opId}/${Date.now()}_${safeName}`);
+                const source = typeof fileOrDataUrl === 'string' ? dataUrlToBlob(fileOrDataUrl) : fileOrDataUrl;
+                await ref.put(source, { contentType: 'application/pdf' });
+                return await ref.getDownloadURL();
+            };
+
+            const syncPendingOperations = async () => {
+                if (!db || !storage) return;
+                const queue = getPendingSync();
+                if (!queue.length) return;
+                const remaining = [];
+                for (const action of queue) {
+                    try {
+                        if (action.type === 'delete') {
+                            await db.collection('ops_aviamentos').doc(action.id).delete();
+                        } else if (action.type === 'upsert') {
+                            let op = { ...action.op };
+                            if (op.pdfPendingUpload && op.pdfBase64) {
+                                op.pdfUrl = await uploadPdfToStorage(op.id, op.pdfBase64, op.pdfName);
+                                op.pdfPendingUpload = false;
+                                delete op.pdfBase64;
+                            }
+                            await db.collection('ops_aviamentos').doc(op.id).set(op);
+                        }
+                    } catch (err) {
+                        console.error('Falha ao sincronizar item pendente:', err);
+                        remaining.push(action);
+                    }
+                }
+                setPendingSync(remaining);
             };
 
             useEffect(() => {
@@ -209,15 +287,30 @@
                 setDbStatus('conectando');
                 
                 const unsubscribe = db.collection('ops_aviamentos')
-                    .onSnapshot((snapshot) => {
+                    .onSnapshot(async (snapshot) => {
                         const loadedOps = [];
                         snapshot.forEach(doc => {
                             loadedOps.push({ id: doc.id, ...doc.data() });
                         });
-                        setOps(loadedOps);
                         setDbStatus('online');
                         setPermissionDeniedError(false);
-                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
+
+                        const pending = getPendingSync();
+                        const pendingUpserts = pending.filter(x => x.type === 'upsert').map(x => x.op);
+                        const pendingDeletes = new Set(pending.filter(x => x.type === 'delete').map(x => x.id));
+                        let cachedOps = [];
+                        try { cachedOps = JSON.parse(localStorage.getItem('ops_aviamentos_cache') || '[]'); } catch (_) { cachedOps = []; }
+                        if (!Array.isArray(cachedOps)) cachedOps = [];
+
+                        const mergedMap = new Map();
+                        [...cachedOps, ...loadedOps, ...pendingUpserts].forEach(op => {
+                            if (!pendingDeletes.has(op.id)) mergedMap.set(op.id, op);
+                        });
+                        const merged = Array.from(mergedMap.values());
+
+                        setOps(merged);
+                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(merged));
+                        await syncPendingOperations();
                     }, (error) => {
                         console.error("Erro ao ler banco de dados Firestore: ", error);
                         if (error.message && (error.message.includes('permissions') || error.code === 'permission-denied')) {
@@ -241,28 +334,128 @@
                 }
             };
 
-            const saveOpToDb = (updatedOp) => {
-                if (dbStatus === 'online' && db) {
-                    db.collection('ops_aviamentos').doc(updatedOp.id).set(updatedOp)
-                        .catch(err => {
-                            console.error("Erro ao salvar dados na nuvem, aplicando localmente.", err);
-                            updateLocalState(updatedOp);
-                        });
-                } else {
-                    updateLocalState(updatedOp);
-                }
-            };
-
             const updateLocalState = (updatedOp) => {
-                const exist = ops.some(o => o.id === updatedOp.id);
-                let newOps = [];
-                if (exist) {
-                    newOps = ops.map(o => o.id === updatedOp.id ? updatedOp : o);
-                } else {
-                    newOps = [...ops, updatedOp];
+                // Persistência local imediata: o registro fica disponível mesmo se o Firebase
+                // estiver indisponível ou se a leitura realtime ainda estiver inicializando.
+                let current = [];
+                try {
+                    current = JSON.parse(localStorage.getItem('ops_aviamentos_cache') || '[]');
+                    if (!Array.isArray(current)) current = [];
+                } catch (_) { current = []; }
+
+                const index = current.findIndex(o => o.id === updatedOp.id);
+                const newOps = [...current];
+                if (index >= 0) newOps[index] = updatedOp;
+                else newOps.push(updatedOp);
+
+                try {
+                    localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+                } catch (e) {
+                    console.error('Falha ao gravar o cadastro no armazenamento local:', e);
+                    throw new Error('O navegador não permitiu gravar o registro localmente. Verifique o armazenamento do navegador.');
                 }
                 setOps(newOps);
-                localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+                return newOps;
+            };
+
+            const saveOpToDb = async (updatedOp) => {
+                const pendingFile = pendingPdfFilesRef.current.get(updatedOp.id) || null;
+                let opToSave = { ...updatedOp };
+                delete opToSave.__pdfFile;
+
+                // O PDF NÃO é colocado dentro do documento do Firestore.
+                // Primeiro persistimos a OP. Depois enviamos o arquivo ao Storage.
+                // Isso impede que uma falha no upload do PDF cancele o cadastro.
+                if (pendingFile) {
+                    opToSave.pdfPendingUpload = true;
+                    opToSave.pdfName = pendingFile.name;
+                    opToSave.pdfBase64 = '';
+                }
+
+                // 1) Sempre grava uma cópia local imediatamente.
+                updateLocalState(opToSave);
+                queueSync({ type: 'upsert', id: opToSave.id, op: opToSave });
+
+                // 2) Garante autenticação antes de tentar o Firestore.
+                try {
+                    if (firebaseOnline && auth && !auth.currentUser) {
+                        await auth.signInAnonymously();
+                    }
+                } catch (authErr) {
+                    console.error('Falha na autenticação Firebase:', authErr);
+                }
+
+                if (!(db && auth && auth.currentUser)) {
+                    // Offline: se houver PDF, mantém uma cópia pequena em base64
+                    // para que a fila possa ser sincronizada depois.
+                    if (pendingFile) {
+                        if (pendingFile.size <= 2 * 1024 * 1024) {
+                            try {
+                                opToSave.pdfBase64 = await fileToDataUrl(pendingFile);
+                                updateLocalState(opToSave);
+                                queueSync({ type: 'upsert', id: opToSave.id, op: opToSave });
+                            } catch (e) {
+                                console.error('Não foi possível guardar o PDF localmente:', e);
+                            }
+                        }
+                    }
+                    return opToSave;
+                }
+
+                // 3) Grava somente os dados da OP no Firestore.
+                // Não envia Blob/Base64 para o Firestore.
+                const firestoreOp = { ...opToSave };
+                delete firestoreOp.pdfBase64;
+
+                try {
+                    await db.collection('ops_aviamentos').doc(opToSave.id).set(firestoreOp, { merge: true });
+                } catch (dbErr) {
+                    console.error('ERRO FIRESTORE AO SALVAR OP:', dbErr);
+                    setDbStatus('offline');
+                    // Mantém a OP na fila e no cache local.
+                    queueSync({ type: 'upsert', id: opToSave.id, op: opToSave });
+                    alert('A OP foi mantida no computador, mas o Firebase recusou o salvamento.\n\nErro: ' + (dbErr.message || dbErr));
+                    return opToSave;
+                }
+
+                // 4) Somente depois que a OP existe no Firestore, envia o PDF.
+                if (pendingFile && storage) {
+                    try {
+                        const pdfUrl = await uploadPdfToStorage(opToSave.id, pendingFile, pendingFile.name);
+                        const finalOp = {
+                            ...opToSave,
+                            pdfUrl,
+                            pdfName: pendingFile.name,
+                            pdfPendingUpload: false,
+                            pdfBase64: ''
+                        };
+                        const finalFirestoreOp = { ...finalOp };
+                        delete finalFirestoreOp.pdfBase64;
+                        await db.collection('ops_aviamentos').doc(opToSave.id).set(finalFirestoreOp, { merge: true });
+                        opToSave = finalOp;
+                        updateLocalState(opToSave);
+                        pendingPdfFilesRef.current.delete(opToSave.id);
+                    } catch (pdfErr) {
+                        console.error('OP salva, mas PDF não enviado:', pdfErr);
+                        // A OP continua salva. Guardamos o PDF pequeno localmente para nova tentativa.
+                        if (pendingFile.size <= 2 * 1024 * 1024) {
+                            try {
+                                opToSave.pdfBase64 = await fileToDataUrl(pendingFile);
+                                updateLocalState(opToSave);
+                                queueSync({ type: 'upsert', id: opToSave.id, op: opToSave });
+                            } catch (_) {}
+                        }
+                        alert('A OP foi salva, mas o PDF não pôde ser enviado.\n\nErro do Storage: ' + (pdfErr.message || pdfErr));
+                    }
+                }
+
+                // 5) Só removemos da fila quando a OP e o PDF (se houver) estiverem concluídos.
+                if (!opToSave.pdfPendingUpload) {
+                    setPendingSync(getPendingSync().filter(item => !(item.type === 'upsert' && item.id === opToSave.id)));
+                }
+                updateLocalState(opToSave);
+                setDbStatus('online');
+                return opToSave;
             };
 
             const getSuggestedSla = () => {
@@ -284,6 +477,7 @@
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: op.isPriority || false,
                         pdfBase64: op.pdfBase64 || '',
+                        pdfUrl: op.pdfUrl || '',
                         pdfName: op.pdfName || ''
                     });
                 } else {
@@ -297,9 +491,11 @@
                         slaDeadline: getSuggestedSla(),
                         isPriority: false,
                         pdfBase64: '',
+                        pdfUrl: '',
                         pdfName: ''
                     });
                 }
+                setPdfFile(null);
                 setIsModalOpen(true);
             };
 
@@ -312,28 +508,29 @@
                 const file = e.target.files[0];
                 if (!file) return;
 
-                if (file.type !== "application/pdf") {
-                    alert("Apenas arquivos no formato PDF são aceitos!");
+                if (file.type !== 'application/pdf') {
+                    alert('Apenas arquivos no formato PDF são aceitos!');
                     e.target.value = '';
                     return;
                 }
 
-                if (file.size > 800 * 1024) {
-                    alert("O arquivo PDF ultrapassou o limite de 800KB. Reduza o tamanho do arquivo.");
+                const maxSize = 10 * 1024 * 1024;
+                if (file.size > maxSize) {
+                    alert('O arquivo PDF ultrapassou o limite de 10 MB.');
                     e.target.value = '';
                     return;
                 }
 
-                const reader = new FileReader();
-                reader.onload = () => {
-                    setFormData(prev => ({
-                        ...prev,
-                        pdfBase64: reader.result,
-                        pdfName: file.name
-                    }));
-                };
-                reader.readAsDataURL(file);
+                setPdfFile(file);
+                setFormData(prev => ({ ...prev, pdfName: file.name, pdfBase64: '', pdfUrl: '' }));
             };
+
+            const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
 
             const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
                 setPasswordModal({
@@ -365,7 +562,10 @@
 
                 setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null });
 
-                if (action === 'delete') {
+                if (action === 'configure_passwords') {
+                    setTempPasswords({ ...passwords });
+                    setIsSettingsOpen(true);
+                } else if (action === 'delete') {
                     executeDeleteOp(data.id);
                 } else if (action === 'allow_edit') {
                     setEditingOp(data);
@@ -378,6 +578,7 @@
                         slaDeadline: data.slaDeadline ? data.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: data.isPriority || false,
                         pdfBase64: data.pdfBase64 || '',
+                        pdfUrl: data.pdfUrl || '',
                         pdfName: data.pdfName || ''
                     });
                 } else if (action === 'save_edit') {
@@ -389,17 +590,23 @@
                 }
             };
 
-            const executeDeleteOp = (opId) => {
+            const executeDeleteOp = async (opId) => {
                 if (dbStatus === 'online' && db) {
-                    db.collection('ops_aviamentos').doc(opId).delete()
-                        .then(() => handleCloseModal())
-                        .catch(err => console.error("Erro ao deletar OP na nuvem: ", err));
+                    try {
+                        await db.collection('ops_aviamentos').doc(opId).delete();
+                    } catch (err) {
+                        queueSync({ type: 'delete', id: opId });
+                        const newOps = ops.filter(o => o.id !== opId);
+                        setOps(newOps);
+                        localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
+                    }
                 } else {
+                    queueSync({ type: 'delete', id: opId });
                     const newOps = ops.filter(o => o.id !== opId);
                     setOps(newOps);
                     localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
-                    handleCloseModal();
                 }
+                handleCloseModal();
             };
 
             // Mover do Almoxarifado -> Distribuição
@@ -424,48 +631,102 @@
                 handleCloseModal();
             };
 
-            const handleSaveOp = (e) => {
-                e.preventDefault();
-                const formattedDeadline = new Date(formData.slaDeadline).toISOString();
+            const canChangeStatus = (from, to, role) => {
+                if (!from || from === to) return true;
+                if (role === 'pcp') return to === 'pendente';
+                if (role === 'almoxarifado') {
+                    const allowed = ['pendente', 'em_separacao', 'aguardando_compra', 'parcial'];
+                    return allowed.includes(from) && allowed.includes(to);
+                }
+                if (role === 'distribuicao') return from === 'em_distribuicao' && to === 'em_distribuicao';
+                return false;
+            };
 
-                if (editingOp) {
-                    if (userRole === 'pcp') {
-                        triggerPasswordCheck('pcp', 'save_edit', { ...editingOp, ...formData, slaDeadline: formattedDeadline });
-                    } else {
-                        executeSaveOp({ ...editingOp, ...formData, slaDeadline: formattedDeadline });
+            const handleSaveOp = async (e) => {
+                e.preventDefault();
+                if (isSaving) return;
+                setIsSaving(true);
+
+                try {
+                    if (!formData.opNumber.trim() || !formData.model.trim() || !formData.faccaoDestino.trim()) {
+                        alert('Preencha os campos obrigatórios da OP.');
+                        return;
                     }
-                } else {
-                    // Criar Nova OP exige senha PCP se configurado, ou cria diretamente no setor PCP
-                    const newOp = {
-                        id: `sol-${Date.now()}`,
-                        opNumber: formData.opNumber,
-                        model: formData.model,
-                        faccaoDestino: formData.faccaoDestino,
-                        status: 'pendente',
-                        notes: formData.notes,
-                        requestTime: new Date().toISOString(),
-                        slaDeadline: formattedDeadline,
-                        completedTime: null,
-                        isPriority: formData.isPriority,
-                        pdfBase64: formData.pdfBase64,
-                        pdfName: formData.pdfName,
-                        items: []
-                    };
-                    saveOpToDb(newOp);
-                    handleCloseModal();
+
+                    const formattedDeadline = formData.slaDeadline
+                        ? new Date(formData.slaDeadline).toISOString()
+                        : null;
+
+                    const opId = editingOp?.id || `sol-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                    const hasPdf = !!pdfFile;
+
+                    // O arquivo fica temporariamente em memória. Ele só é enviado
+                    // depois que a OP for confirmada no Firestore.
+                    if (pdfFile) {
+                        pendingPdfFilesRef.current.set(opId, pdfFile);
+                    }
+
+                    if (editingOp) {
+                        const proposed = {
+                            ...editingOp,
+                            ...formData,
+                            id: editingOp.id,
+                            slaDeadline: formattedDeadline,
+                            pdfUrl: pdfFile ? '' : (formData.pdfUrl || editingOp.pdfUrl || ''),
+                            pdfBase64: '',
+                            pdfPendingUpload: hasPdf,
+                            pdfName: pdfFile ? pdfFile.name : (formData.pdfName || editingOp.pdfName || '')
+                        };
+
+                        if (!canChangeStatus(editingOp.status, proposed.status, userRole)) {
+                            pendingPdfFilesRef.current.delete(opId);
+                            alert('Esta alteração de status não é permitida para o setor atual. Use o botão de avanço de etapa com a senha do setor responsável.');
+                            return;
+                        }
+
+                        if (userRole === 'pcp') {
+                            triggerPasswordCheck('pcp', 'save_edit', proposed);
+                        } else {
+                            await executeSaveOp(proposed);
+                        }
+                    } else {
+                        const newOp = {
+                            id: opId,
+                            opNumber: formData.opNumber.trim(),
+                            model: formData.model.trim(),
+                            faccaoDestino: formData.faccaoDestino.trim(),
+                            status: 'pendente',
+                            notes: formData.notes,
+                            requestTime: new Date().toISOString(),
+                            slaDeadline: formattedDeadline,
+                            completedTime: null,
+                            isPriority: formData.isPriority,
+                            pdfBase64: '',
+                            pdfUrl: '',
+                            pdfName: pdfFile ? pdfFile.name : '',
+                            pdfPendingUpload: hasPdf,
+                            items: []
+                        };
+
+                        await saveOpToDb(newOp);
+                        handleCloseModal();
+                    }
+                } catch (err) {
+                    console.error('Erro no cadastro da OP:', err);
+                    alert('Não foi possível salvar a OP: ' + (err.message || err));
+                } finally {
+                    setIsSaving(false);
                 }
             };
 
-            const executeSaveOp = (opToSave) => {
+            const executeSaveOp = async (opToSave) => {
                 let finalOp = { ...opToSave };
-
-                if (opToSave.status === 'completo' && !opToSave.completedTime) {
+                if (finalOp.status === 'completo' && !finalOp.completedTime) {
                     finalOp.completedTime = new Date().toISOString();
-                } else if (opToSave.status !== 'completo') {
+                } else if (finalOp.status !== 'completo') {
                     finalOp.completedTime = null;
                 }
-
-                saveOpToDb(finalOp);
+                await saveOpToDb(finalOp);
                 handleCloseModal();
             };
 
@@ -608,7 +869,7 @@
                             </div>
                         </div>
 
-                        {op.pdfBase64 && (
+                        {(op.pdfUrl || op.pdfBase64) && (
                             <div className="mt-1 mb-2 inline-flex items-center gap-1 text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">
                                 <i data-lucide="file-text" className="w-3 h-3"></i> Ficha Técnica PDF
                             </div>
@@ -699,6 +960,16 @@
                             </button>
 
                           
+
+                            {userRole === 'pcp' && (
+                                <button
+                                    onClick={() => triggerPasswordCheck('pcp', 'configure_passwords', null)}
+                                    className="px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-700 transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                                    title="Configurar senhas dos setores"
+                                >
+                                    <i data-lucide="key-round" className="w-4 h-4"></i> Senhas
+                                </button>
+                            )}
 
                             {/* Input de Pesquisa Principal */}
                             <div className="relative w-full md:w-56">
@@ -939,7 +1210,7 @@
                                         {userRole === 'pcp' && !editingOp && (
                                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                                                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1 flex items-center gap-1.5">
-                                                    <i data-lucide="file-plus" className="w-4 h-4"></i> Anexar PDF da OP / Ficha Técnica (Max 800KB)
+                                                    <i data-lucide="file-plus" className="w-4 h-4"></i> Anexar PDF da OP / Ficha Técnica (armazenado no Firebase Storage)
                                                 </label>
                                                 <input 
                                                     type="file" 
@@ -970,13 +1241,13 @@
                                             </div>
                                         )}
 
-                                        {editingOp && editingOp.pdfBase64 && (
+                                        {editingOp && (editingOp.pdfUrl || editingOp.pdfBase64) && (
                                             <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex justify-between items-center">
                                                 <div className="text-xs text-blue-800 font-semibold flex items-center gap-1.5">
                                                     <i data-lucide="file-text" className="w-4 h-4"></i> {editingOp.pdfName || "Ficha_Tecnica.pdf"}
                                                 </div>
                                                 <a 
-                                                    href={editingOp.pdfBase64} 
+                                                    href={editingOp.pdfUrl || editingOp.pdfBase64} 
                                                     target="_blank" 
                                                     rel="noopener noreferrer"
                                                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm transition-all"
@@ -995,13 +1266,16 @@
                                                 <div>
                                                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status Interno</label>
                                                     <select 
-                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                                                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100"
                                                         value={formData.status} 
+                                                        disabled={userRole === 'distribuicao' || formData.status === 'em_distribuicao' || formData.status === 'completo'}
                                                         onChange={e => setFormData({...formData, status: e.target.value})}
                                                     >
-                                                        {statusOptions.map(opt => (
-                                                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                                                        ))}
+                                                        {statusOptions
+                                                            .filter(opt => userRole === 'pcp' ? opt.id === 'pendente' : userRole === 'almoxarifado' ? ['pendente','em_separacao','aguardando_compra','parcial'].includes(opt.id) : opt.id === 'em_distribuicao')
+                                                            .map(opt => (
+                                                                <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                            ))}
                                                     </select>
                                                 </div>
 
@@ -1020,7 +1294,7 @@
                                                     <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Checklist de Separação dos Itens</label>
                                                     
                                                     {userRole === 'almoxarifado' && (
-                                                        <form onSubmit={handleAddChecklistItem} className="flex gap-2 mb-3">
+                                                        <div className="flex gap-2 mb-3">
                                                             <input 
                                                                 type="text" 
                                                                 placeholder="Adicionar aviamento (Ex: Zíper 15cm)..."
@@ -1035,7 +1309,7 @@
                                                             >
                                                                 <i data-lucide="plus" className="w-4 h-4"></i> Inserir
                                                             </button>
-                                                        </form>
+                                                        </div>
                                                     )}
 
                                                     <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
@@ -1186,9 +1460,9 @@
                                                         </div>
 
                                                         <div className="flex justify-between items-center border-t border-slate-100 pt-3 mt-2">
-                                                            {op.pdfBase64 ? (
+                                                            {(op.pdfUrl || op.pdfBase64) ? (
                                                                 <a 
-                                                                    href={op.pdfBase64}
+                                                                    href={op.pdfUrl || op.pdfBase64}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
                                                                     className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
@@ -1282,7 +1556,7 @@
                                             type="submit"
                                             className="flex-1 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold"
                                         >
-                                            Validar
+                                            {isSaving ? 'Salvando...' : 'Validar'}
                                         </button>
                                     </div>
                                 </form>
@@ -1310,7 +1584,7 @@
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha PCP / Planejamento</label>
                                         <input 
-                                            type="text" required
+                                            type="password" required
                                             className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={tempPasswords.pcp}
                                             onChange={e => setTempPasswords({ ...tempPasswords, pcp: e.target.value })}
@@ -1320,7 +1594,7 @@
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha Almoxarifado (Separação)</label>
                                         <input 
-                                            type="text" required
+                                            type="password" required
                                             className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={tempPasswords.almoxarifado}
                                             onChange={e => setTempPasswords({ ...tempPasswords, almoxarifado: e.target.value })}
@@ -1348,8 +1622,7 @@
                                         <button 
                                             type="button"
                                             onClick={() => {
-                                                savePasswordsConfig(tempPasswords);
-                                                setIsSettingsOpen(false);
+                                                if (savePasswordsConfig(tempPasswords)) setIsSettingsOpen(false);
                                             }}
                                             className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-100"
                                         >
