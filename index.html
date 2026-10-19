@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Aviamentos por OP - Com Personalização e Backup</title>
+    <title>Painel de Aviamentos por OP - Gestão Avançada de Fases</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -23,7 +23,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- SheetJS (XLSX) para Exportação Excel -->
+    <!-- SheetJS (XLSX) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     
     <!-- Fonte Inter -->
@@ -54,10 +54,10 @@
         };
 
         const defaultColumnsConfig = [
-            { id: 'pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statuses: ['pendente'], sector: 'pcp' },
-            { id: 'almoxarifado', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statuses: ['em_separacao', 'aguardando_compra', 'parcial'], sector: 'almoxarifado' },
-            { id: 'distribuicao', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statuses: ['em_distribuicao'], sector: 'distribuicao' },
-            { id: 'finalizado', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statuses: ['completo'], sector: 'finalizado' }
+            { id: 'col_pcp', title: '1. PCP / Pendentes', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusId: 'pendente', sector: 'pcp' },
+            { id: 'col_almox', title: '2. Em Separação / Almox', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusId: 'em_separacao', sector: 'almoxarifado' },
+            { id: 'col_dist', title: '3. Distribuição / Entrega', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusId: 'em_distribuicao', sector: 'distribuicao' },
+            { id: 'col_final', title: '4. Finalizados / Entregue', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusId: 'completo', sector: 'finalizado' }
         ];
 
         let db = null;
@@ -93,7 +93,6 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingOp, setEditingOp] = useState(null);
-            const [userRole, setUserRole] = useState('pcp');
             const [dbStatus, setDbStatus] = useState('conectando');
             const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -103,11 +102,11 @@
                 return saved ? JSON.parse(saved) : defaultColumnsConfig;
             });
             const [isManageColumnsOpen, setIsManageColumnsOpen] = useState(false);
+            const [editingColumn, setEditingColumn] = useState(null);
 
             // Histórico
             const [isHistoryOpen, setIsHistoryOpen] = useState(false);
             const [historySearchTerm, setHistorySearchTerm] = useState('');
-            const [historyDateFilter, setHistoryDateFilter] = useState('all');
 
             // Senhas
             const [passwords, setPasswords] = useState(() => {
@@ -124,10 +123,8 @@
                 opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
             });
 
-            const [newChecklistItem, setNewChecklistItem] = useState('');
-
-            // Formulário de Nova Fase
-            const [newPhaseData, setNewPhaseData] = useState({
+            // Form de Fase
+            const [phaseFormData, setPhaseFormData] = useState({
                 title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: ''
             });
 
@@ -181,10 +178,15 @@
                 localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
             };
 
-            // EXPORTAÇÃO EXCEL (Ativas + Finalizadas)
+            const saveColumnsConfig = (newCols) => {
+                setColumns(newCols);
+                localStorage.setItem('ops_columns_config', JSON.stringify(newCols));
+            };
+
+            // EXPORTAÇÃO EXCEL
             const handleExportToExcel = () => {
                 if (typeof XLSX === 'undefined') {
-                    alert("Biblioteca Excel carregando, tente novamente em alguns segundos.");
+                    alert("Biblioteca Excel carregando, aguarde...");
                     return;
                 }
 
@@ -202,31 +204,24 @@
                         "Prazo SLA": formatDateTime(op.slaDeadline),
                         "Data Conclusão": formatDateTime(op.completedTime),
                         "Status SLA": sla.text,
-                        "Observações": op.notes || '',
-                        "Itens Checklist": (op.items || []).map(i => `${i.name} [${i.checked ? 'OK' : 'PENDENTE'}]`).join(' | ')
+                        "Observações": op.notes || ''
                     };
                 });
 
                 const worksheet = XLSX.utils.json_to_sheet(dataToExport);
                 const workbook = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook, worksheet, "Ordens de Servico");
-                XLSX.writeFile(workbook, `Relatorio_OPs_Aviamentos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Ordens");
+                XLSX.writeFile(workbook, `Relatorio_OPs_${new Date().toISOString().slice(0, 10)}.xlsx`);
             };
 
             // BACKUP JSON GERAL
             const handleExportBackupJSON = () => {
-                const backupPayload = {
-                    version: "2.0",
-                    exportDate: new Date().toISOString(),
-                    columns: columns,
-                    passwords: passwords,
-                    ops: ops
-                };
+                const backupPayload = { version: "2.1", columns, passwords, ops };
                 const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `Backup_Completo_Firebase_OPs_${new Date().toISOString().slice(0, 10)}.json`;
+                a.download = `Backup_OPs_${new Date().toISOString().slice(0, 10)}.json`;
                 a.click();
             };
 
@@ -243,58 +238,107 @@
                             return;
                         }
 
-                        if (confirm(`Deseja restaurar ${importedData.ops.length} OPs? Isso atualizará seu banco local/nuvem.`)) {
+                        if (confirm(`Restaurar ${importedData.ops.length} OPs?`)) {
                             setOps(importedData.ops);
                             localStorage.setItem('ops_aviamentos_cache', JSON.stringify(importedData.ops));
-
-                            if (importedData.columns) {
-                                setColumns(importedData.columns);
-                                localStorage.setItem('ops_columns_config', JSON.stringify(importedData.columns));
-                            }
-
+                            if (importedData.columns) saveColumnsConfig(importedData.columns);
                             if (importedData.passwords) {
                                 setPasswords(importedData.passwords);
                                 localStorage.setItem('ops_passwords', JSON.stringify(importedData.passwords));
                             }
-
                             if (dbStatus === 'online' && db) {
                                 importedData.ops.forEach(op => db.collection('ops_aviamentos').doc(op.id).set(op));
                             }
-                            alert("Restauração concluída com sucesso!");
+                            alert("Restauração efetuada com sucesso!");
                         }
                     } catch (err) {
-                        alert("Erro ao ler arquivo de backup JSON.");
+                        alert("Erro ao restaurar backup.");
                     }
                 };
                 reader.readAsText(file);
             };
 
-            // Adicionar Nova Fase
-            const handleAddPhase = (e) => {
+            // GESTÃO DE COLUNAS/FASES (MOVER, EDITAR, EXCLUIR)
+            const handleMoveColumn = (index, direction) => {
+                const newCols = [...columns];
+                const targetIndex = index + direction;
+                if (targetIndex < 0 || targetIndex >= newCols.length) return;
+
+                const temp = newCols[index];
+                newCols[index] = newCols[targetIndex];
+                newCols[targetIndex] = temp;
+
+                saveColumnsConfig(newCols);
+            };
+
+            const handleStartEditColumn = (col) => {
+                setEditingColumn(col);
+                setPhaseFormData({
+                    title: col.title,
+                    sector: col.sector || 'almoxarifado',
+                    statusId: col.statusId || col.id,
+                    color: col.color || 'border-indigo-300 bg-indigo-50/20',
+                    password: passwords[col.sector] || ''
+                });
+            };
+
+            const handleSavePhase = (e) => {
                 e.preventDefault();
-                if (!newPhaseData.title || !newPhaseData.statusId) return;
+                if (!phaseFormData.title || !phaseFormData.statusId) return;
 
-                const newCol = {
-                    id: `col_${Date.now()}`,
-                    title: newPhaseData.title,
-                    color: newPhaseData.color,
-                    badgeColor: 'bg-indigo-100 text-indigo-800',
-                    statuses: [newPhaseData.statusId.toLowerCase().replace(/\s+/g, '_')],
-                    sector: newPhaseData.sector
-                };
+                const statusFormatted = phaseFormData.statusId.toLowerCase().replace(/\s+/g, '_');
 
-                const updatedCols = [...columns, newCol];
-                setColumns(updatedCols);
-                localStorage.setItem('ops_columns_config', JSON.stringify(updatedCols));
+                if (editingColumn) {
+                    const updatedCols = columns.map(c => c.id === editingColumn.id ? {
+                        ...c,
+                        title: phaseFormData.title,
+                        statusId: statusFormatted,
+                        sector: phaseFormData.sector,
+                        color: phaseFormData.color
+                    } : c);
+                    saveColumnsConfig(updatedCols);
+                    setEditingColumn(null);
+                } else {
+                    const newCol = {
+                        id: `col_${Date.now()}`,
+                        title: phaseFormData.title,
+                        color: phaseFormData.color,
+                        badgeColor: 'bg-indigo-100 text-indigo-800',
+                        statusId: statusFormatted,
+                        sector: phaseFormData.sector
+                    };
+                    saveColumnsConfig([...columns, newCol]);
+                }
 
-                if (newPhaseData.password) {
-                    const newPasses = { ...passwords, [newPhaseData.sector]: newPhaseData.password };
+                if (phaseFormData.password) {
+                    const newPasses = { ...passwords, [phaseFormData.sector]: phaseFormData.password };
                     setPasswords(newPasses);
                     localStorage.setItem('ops_passwords', JSON.stringify(newPasses));
                 }
 
-                setNewPhaseData({ title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: '' });
-                alert("Nova fase cadastrada com sucesso!");
+                setPhaseFormData({ title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: '' });
+            };
+
+            const handleDeleteColumn = (colId) => {
+                if (columns.length <= 1) {
+                    alert("Você deve manter pelo menos uma fase no Kanban.");
+                    return;
+                }
+                if (confirm("Tem certeza que deseja excluir esta fase? As OPs nela continuarão salvas no banco.")) {
+                    const updatedCols = columns.filter(c => c.id !== colId);
+                    saveColumnsConfig(updatedCols);
+                }
+            };
+
+            // MOVIMENTAÇÃO DE FASE DA OP (Avançar/Voltar)
+            const handleMoveOpPhase = (op, direction) => {
+                const currentIndex = columns.findIndex(c => c.statusId === op.status);
+                const targetIndex = currentIndex + direction;
+
+                if (targetIndex < 0 || targetIndex >= columns.length) return;
+
+                const targetColumn = columns[targetIndex];
+                triggerPasswordCheck(targetColumn.sector, 'move_phase', { op, nextStatus: targetColumn.statusId });
             };
 
             const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
@@ -324,8 +368,8 @@
                 setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null });
 
                 if (action === 'delete') executeDeleteOp(data.id);
-                else if (action === 'allow_edit') handleOpenModal(data);
                 else if (action === 'move_phase') executeMovePhase(data.op, data.nextStatus);
+                else if (action === 'save_op') executeSaveOp(data);
             };
 
             const executeDeleteOp = (opId) => {
@@ -343,7 +387,7 @@
                 const updatedOp = {
                     ...opToMove,
                     status: nextStatus,
-                    completedTime: nextStatus === 'completo' ? new Date().toISOString() : opToMove.completedTime
+                    completedTime: nextStatus === 'completo' ? new Date().toISOString() : (opToMove.completedTime || null)
                 };
                 saveOpToDb(updatedOp);
                 setIsModalOpen(false);
@@ -356,7 +400,7 @@
                         opNumber: op.opNumber || '',
                         model: op.model || '',
                         faccaoDestino: op.faccaoDestino || '',
-                        status: op.status || 'pendente',
+                        status: op.status || (columns[0] ? columns[0].statusId : 'pendente'),
                         notes: op.notes || '',
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : '',
                         isPriority: op.isPriority || false,
@@ -365,9 +409,40 @@
                     });
                 } else {
                     setEditingOp(null);
-                    setFormData({ opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: '' });
+                    setFormData({ 
+                        opNumber: '', model: '', faccaoDestino: '', 
+                        status: columns[0] ? columns[0].statusId : 'pendente', 
+                        notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: '' 
+                    });
                 }
                 setIsModalOpen(true);
+            };
+
+            const handleSaveOpSubmit = (e) => {
+                e.preventDefault();
+                const payload = {
+                    id: editingOp ? editingOp.id : `sol-${Date.now()}`,
+                    opNumber: formData.opNumber,
+                    model: formData.model,
+                    faccaoDestino: formData.faccaoDestino,
+                    status: formData.status,
+                    notes: formData.notes,
+                    requestTime: editingOp ? editingOp.requestTime : new Date().toISOString(),
+                    slaDeadline: formData.slaDeadline ? new Date(formData.slaDeadline).toISOString() : new Date().toISOString(),
+                    completedTime: formData.status === 'completo' ? new Date().toISOString() : null,
+                    isPriority: formData.isPriority,
+                    pdfBase64: formData.pdfBase64,
+                    pdfName: formData.pdfName
+                };
+
+                const currentCol = columns.find(c => c.statusId === formData.status);
+                const requiredSector = currentCol ? currentCol.sector : 'pcp';
+                triggerPasswordCheck(requiredSector, 'save_op', payload);
+            };
+
+            const executeSaveOp = (opToSave) => {
+                saveOpToDb(opToSave);
+                setIsModalOpen(false);
             };
 
             const isCompletedAndOld = (op) => {
@@ -393,35 +468,22 @@
                                 <i data-lucide="package" className="w-6 h-6"></i>
                             </div>
                             <div>
-                                <h1 className="text-lg font-extrabold text-slate-800 leading-tight">Almoxarifado & Distribuição Flow</h1>
-                                <p className="text-xs text-slate-400">Gestão de Aviamentos e Fases Customizáveis</p>
+                                <h1 className="text-lg font-extrabold text-slate-800 leading-tight">Painel de Aviamentos</h1>
+                                <p className="text-xs text-slate-400">Gerenciamento Dinâmico de OPs e Fases</p>
                             </div>
                         </div>
 
                         <div className="flex flex-wrap gap-2 items-center w-full md:w-auto justify-end">
-                            {/* Botão Exportar Excel */}
-                            <button 
-                                onClick={handleExportToExcel}
-                                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold shadow-md shadow-emerald-100"
-                            >
-                                <i data-lucide="file-spreadsheet" className="w-4 h-4"></i> Exportar Excel
+                            <button onClick={handleExportToExcel} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm">
+                                <i data-lucide="file-spreadsheet" className="w-4 h-4"></i> Excel
                             </button>
 
-                            {/* Botão Gerenciar Fases */}
-                            <button 
-                                onClick={() => setIsManageColumnsOpen(true)}
-                                className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold"
-                            >
-                                <i data-lucide="layout" className="w-4 h-4"></i> Personalizar Fases
+                            <button onClick={() => setIsManageColumnsOpen(true)} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold">
+                                <i data-lucide="sliders" className="w-4 h-4"></i> Configurar Fases
                             </button>
 
-                            {/* Menu Backup */}
-                            <button 
-                                onClick={handleExportBackupJSON}
-                                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold"
-                                title="Baixar Cópia do Banco de Dados"
-                            >
-                                <i data-lucide="download" className="w-4 h-4"></i> Backup JSON
+                            <button onClick={handleExportBackupJSON} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold">
+                                <i data-lucide="download" className="w-4 h-4"></i> Backup
                             </button>
 
                             <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer">
@@ -429,27 +491,16 @@
                                 <input type="file" accept=".json" onChange={handleImportBackupJSON} className="hidden" />
                             </label>
 
-                            {/* Histórico */}
-                            <button 
-                                onClick={() => setIsHistoryOpen(true)}
-                                className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 transition-all flex items-center gap-1.5 text-xs font-bold"
-                            >
+                            <button onClick={() => setIsHistoryOpen(true)} className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 transition-all flex items-center gap-1.5 text-xs font-bold">
                                 <i data-lucide="history" className="w-4 h-4"></i> Histórico ({allCompletedOps.length})
                             </button>
 
-                            {/* Busca */}
                             <div className="relative w-full md:w-48">
                                 <i data-lucide="search" className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
-                                <input 
-                                    type="text" placeholder="Buscar OP..." 
-                                    className="pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs outline-none w-full"
-                                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                                />
+                                <input type="text" placeholder="Buscar OP..." className="pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs outline-none w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                             </div>
                             
-                            <button 
-                                onClick={() => handleOpenModal()}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-100">
+                            <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm">
                                 <i data-lucide="plus" className="w-4 h-4"></i> Nova OP
                             </button>
                         </div>
@@ -459,17 +510,20 @@
                     <main className="flex-1 p-6 flex flex-col">
                         <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
-                                {columns.map(col => {
-                                    const colOps = filteredOps.filter(op => col.statuses.includes(op.status));
+                                {columns.map((col, index) => {
+                                    const colOps = filteredOps.filter(op => op.status === col.statusId);
                                     return (
                                         <div key={col.id} className={`w-80 flex flex-col border rounded-2xl h-[calc(100vh-180px)] min-h-[480px] ${col.color}`}>
                                             <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/80 rounded-t-2xl">
-                                                <h3 className="font-bold text-slate-700 text-xs">{col.title}</h3>
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="font-bold text-slate-700 text-xs">{col.title}</h3>
+                                                </div>
                                                 <span className={`text-[10px] py-0.5 px-2 rounded-full font-bold ${col.badgeColor}`}>{colOps.length}</span>
                                             </div>
+
                                             <div className="p-3 overflow-y-auto flex-1 custom-scrollbar">
                                                 {colOps.map(op => (
-                                                    <div key={op.id} onClick={() => handleOpenModal(op)} className="bg-white p-4 rounded-xl shadow-sm border mb-3 cursor-pointer hover:shadow-md">
+                                                    <div key={op.id} onClick={() => handleOpenModal(op)} className="bg-white p-4 rounded-xl shadow-sm border mb-3 cursor-pointer hover:shadow-md transition-all">
                                                         <div className="flex justify-between items-start mb-1">
                                                             <h4 className="font-bold text-slate-800 text-sm">{op.opNumber}</h4>
                                                             {op.isPriority && <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 rounded">PRIORIDADE</span>}
@@ -478,6 +532,11 @@
                                                         <p className="text-[11px] text-slate-500 mt-1"><i data-lucide="truck" className="w-3 h-3 inline"></i> {op.faccaoDestino}</p>
                                                     </div>
                                                 ))}
+                                                {colOps.length === 0 && (
+                                                    <div className="text-center py-12 text-slate-400 text-xs border-2 border-dashed border-slate-200/80 rounded-xl">
+                                                        Nenhuma OP nesta fase
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -486,39 +545,158 @@
                         </div>
                     </main>
 
-                    {/* Modal Personalizar Fases */}
+                    {/* Modal Detalhes / Edição / Avanço de Fase da OP */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+                                <div className="flex justify-between items-center border-b pb-3">
+                                    <h3 className="font-bold text-slate-800 text-sm">{editingOp ? `Editar OP: ${editingOp.opNumber}` : 'Nova OP'}</h3>
+                                    <button onClick={() => setIsModalOpen(false)}><i data-lucide="x" className="w-5 h-5"></i></button>
+                                </div>
+
+                                {editingOp && (
+                                    <div className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center gap-2">
+                                        <button 
+                                            type="button"
+                                            onClick={() => handleMoveOpPhase(editingOp, -1)}
+                                            className="px-3 py-1.5 bg-white border text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 flex items-center gap-1"
+                                        >
+                                            <i data-lucide="arrow-left" className="w-3.5 h-3.5"></i> Voltar Fase
+                                        </button>
+                                        <span className="text-xs font-bold text-indigo-600 uppercase">Fase Atual: {formData.status}</span>
+                                        <button 
+                                            type="button"
+                                            onClick={() => handleMoveOpPhase(editingOp, 1)}
+                                            className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 flex items-center gap-1 shadow-sm"
+                                        >
+                                            Avançar Fase <i data-lucide="arrow-right" className="w-3.5 h-3.5"></i>
+                                        </button>
+                                    </div>
+                                )}
+
+                                <form onSubmit={handleSaveOpSubmit} className="space-y-3">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 block mb-1">Número da OP *</label>
+                                        <input type="text" required placeholder="Ex: OP-123" className="w-full p-2 border rounded-xl text-xs" value={formData.opNumber} onChange={e => setFormData({...formData, opNumber: e.target.value})} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 block mb-1">Modelo / Referência *</label>
+                                        <input type="text" required placeholder="Ex: Camisa Polo" className="w-full p-2 border rounded-xl text-xs" value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 block mb-1">Facção de Destino *</label>
+                                        <input type="text" required placeholder="Ex: Oficina Externa" className="w-full p-2 border rounded-xl text-xs" value={formData.faccaoDestino} onChange={e => setFormData({...formData, faccaoDestino: e.target.value})} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 block mb-1">Fase / Status Atual</label>
+                                        <select className="w-full p-2 border rounded-xl text-xs" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                                            {columns.map(c => <option key={c.id} value={c.statusId}>{c.title}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 block mb-1">Observações</label>
+                                        <textarea rows="2" className="w-full p-2 border rounded-xl text-xs" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})}></textarea>
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-2">
+                                        {editingOp && (
+                                            <button type="button" onClick={() => triggerPasswordCheck('pcp', 'delete', editingOp)} className="px-3 py-2 bg-red-600 text-white font-bold rounded-xl text-xs">Excluir</button>
+                                        )}
+                                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white font-bold rounded-xl text-xs">Salvar Registro</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Modal Gerenciador de Fases (Reordenar, Editar e Criar) */}
                     {isManageColumnsOpen && (
                         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 flex flex-col max-h-[90vh]">
                                 <div className="flex justify-between items-center border-b pb-3 mb-4">
-                                    <h3 className="font-bold text-slate-800 text-sm">Adicionar Nova Fase ao Kanban</h3>
+                                    <h3 className="font-bold text-slate-800 text-sm">Gerenciador de Fases do Kanban</h3>
                                     <button onClick={() => setIsManageColumnsOpen(false)}><i data-lucide="x" className="w-5 h-5"></i></button>
                                 </div>
-                                <form onSubmit={handleAddPhase} className="space-y-3">
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-600 block mb-1">Título da Coluna/Fase *</label>
-                                        <input type="text" required placeholder="Ex: 2.5 Conferência de Qualidade" className="w-full p-2 border rounded-xl text-xs" value={newPhaseData.title} onChange={e => setNewPhaseData({...newPhaseData, title: e.target.value})} />
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1">
+                                    {/* Lista de Fases Existentes (com botões de reordenar, editar e excluir) */}
+                                    <div className="space-y-3">
+                                        <h4 className="text-xs font-bold text-slate-600 uppercase">Fases Atuais (Ordem do Kanban)</h4>
+                                        {columns.map((col, idx) => (
+                                            <div key={col.id} className="p-3 border rounded-xl bg-slate-50 flex items-center justify-between gap-2">
+                                                <div className="flex-1">
+                                                    <p className="font-bold text-xs text-slate-800">{col.title}</p>
+                                                    <p className="text-[10px] text-slate-500">Status: {col.statusId} | Setor: {col.sector}</p>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button onClick={() => handleMoveColumn(idx, -1)} disabled={idx === 0} className="p-1 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30">
+                                                        <i data-lucide="arrow-left" className="w-4 h-4"></i>
+                                                    </button>
+                                                    <button onClick={() => handleMoveColumn(idx, 1)} disabled={idx === columns.length - 1} className="p-1 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30">
+                                                        <i data-lucide="arrow-right" className="w-4 h-4"></i>
+                                                    </button>
+                                                    <button onClick={() => handleStartEditColumn(col)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                                        <i data-lucide="edit-2" className="w-4 h-4"></i>
+                                                    </button>
+                                                    <button onClick={() => handleDeleteColumn(col.id)} className="p-1 text-red-600 hover:bg-red-50 rounded">
+                                                        <i data-lucide="trash-2" className="w-4 h-4"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2">
+
+                                    {/* Form para Criar/Editar Fase */}
+                                    <form onSubmit={handleSavePhase} className="space-y-3 bg-slate-50 p-4 border rounded-xl">
+                                        <h4 className="text-xs font-bold text-indigo-700 uppercase">
+                                            {editingColumn ? 'Editar Fase Selected' : 'Criar Nova Fase'}
+                                        </h4>
                                         <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">ID do Status *</label>
-                                            <input type="text" required placeholder="Ex: em_conferencia" className="w-full p-2 border rounded-xl text-xs" value={newPhaseData.statusId} onChange={e => setNewPhaseData({...newPhaseData, statusId: e.target.value})} />
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Título da Coluna *</label>
+                                            <input type="text" required placeholder="Ex: Qualidade" className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.title} onChange={e => setPhaseFormData({...phaseFormData, title: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">ID do Status Interno *</label>
+                                            <input type="text" required placeholder="Ex: em_qualidade" className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.statusId} onChange={e => setPhaseFormData({...phaseFormData, statusId: e.target.value})} />
                                         </div>
                                         <div>
                                             <label className="text-xs font-bold text-slate-600 block mb-1">Setor Responsável *</label>
-                                            <select className="w-full p-2 border rounded-xl text-xs" value={newPhaseData.sector} onChange={e => setNewPhaseData({...newPhaseData, sector: e.target.value})}>
+                                            <select className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.sector} onChange={e => setPhaseFormData({...phaseFormData, sector: e.target.value})}>
                                                 <option value="pcp">PCP</option>
                                                 <option value="almoxarifado">Almoxarifado</option>
                                                 <option value="distribuicao">Distribuição</option>
                                                 <option value="qualidade">Qualidade</option>
                                             </select>
                                         </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Senha de Validação do Setor</label>
+                                            <input type="password" placeholder="Digite para alterar..." className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.password} onChange={e => setPhaseFormData({...phaseFormData, password: e.target.value})} />
+                                        </div>
+                                        <div className="flex gap-2 pt-2">
+                                            {editingColumn && (
+                                                <button type="button" onClick={() => { setEditingColumn(null); setPhaseFormData({ title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: '' }); }} className="flex-1 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
+                                            )}
+                                            <button type="submit" className="flex-1 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs">
+                                                {editingColumn ? 'Salvar Fase' : 'Adicionar Fase'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Modal Validação de Senha */}
+                    {passwordModal.isOpen && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 border">
+                                <h3 className="text-xs font-extrabold text-slate-800 uppercase">Validação de Senha ({passwordModal.requiredRole})</h3>
+                                <form onSubmit={handleVerifyPassword} className="space-y-3">
+                                    <input type="password" required autoFocus placeholder="Digite a senha..." className="w-full p-2.5 border rounded-xl text-center text-sm font-bold" value={passwordModal.password} onChange={e => setPasswordModal({ ...passwordModal, password: e.target.value })} />
+                                    {passwordModal.error && <p className="text-[11px] text-red-600 font-bold text-center">{passwordModal.error}</p>}
+                                    <div className="flex gap-2">
+                                        <button type="button" onClick={() => setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null })} className="flex-1 py-2 border rounded-xl text-xs font-bold">Cancelar</button>
+                                        <button type="submit" className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Validar</button>
                                     </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-600 block mb-1">Senha de Validação do Setor (Opcional)</label>
-                                        <input type="password" placeholder="Definir nova senha para esta fase..." className="w-full p-2 border rounded-xl text-xs" value={newPhaseData.password} onChange={e => setNewPhaseData({...newPhaseData, password: e.target.value})} />
-                                    </div>
-                                    <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs mt-2">Criar Fase</button>
                                 </form>
                             </div>
                         </div>
