@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Aviamentos por OP - Gestão Avançada de Fases</title>
+    <title>Painel de Aviamentos por OP - Gestão Avançada e Compatível</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -53,11 +53,12 @@
             measurementId: "G-CJRY2BQWRH"
         };
 
+        // Mapeamento compatível que preserva tanto os status legados quanto os novos
         const defaultColumnsConfig = [
-            { id: 'col_pcp', title: '1. PCP / Pendentes', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusId: 'pendente', sector: 'pcp' },
-            { id: 'col_almox', title: '2. Em Separação / Almox', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusId: 'em_separacao', sector: 'almoxarifado' },
-            { id: 'col_dist', title: '3. Distribuição / Entrega', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusId: 'em_distribuicao', sector: 'distribuicao' },
-            { id: 'col_final', title: '4. Finalizados / Entregue', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusId: 'completo', sector: 'finalizado' }
+            { id: 'col_pcp', title: '1. PCP / Pendentes', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente'], sector: 'pcp' },
+            { id: 'col_almox', title: '2. Em Separação / Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'aguardando_compra', 'parcial'], sector: 'almoxarifado' },
+            { id: 'col_dist', title: '3. Distribuição / Entrega', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao'], sector: 'distribuicao' },
+            { id: 'col_final', title: '4. Finalizados / Entregue', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo'], sector: 'finalizado' }
         ];
 
         let db = null;
@@ -96,11 +97,22 @@
             const [dbStatus, setDbStatus] = useState('conectando');
             const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-            // Gerenciador de Colunas/Fases
+            // Gerenciador de Colunas com suporte a múltiplos status
             const [columns, setColumns] = useState(() => {
                 const saved = localStorage.getItem('ops_columns_config');
-                return saved ? JSON.parse(saved) : defaultColumnsConfig;
+                if (!saved) return defaultColumnsConfig;
+                try {
+                    const parsed = JSON.parse(saved);
+                    // Normalização para garantir formato de lista de statusIds
+                    return parsed.map(c => ({
+                        ...c,
+                        statusIds: c.statusIds || (c.statusId ? [c.statusId] : ['pendente'])
+                    }));
+                } catch (e) {
+                    return defaultColumnsConfig;
+                }
             });
+
             const [isManageColumnsOpen, setIsManageColumnsOpen] = useState(false);
             const [editingColumn, setEditingColumn] = useState(null);
 
@@ -216,7 +228,7 @@
 
             // BACKUP JSON GERAL
             const handleExportBackupJSON = () => {
-                const backupPayload = { version: "2.1", columns, passwords, ops };
+                const backupPayload = { version: "2.2", columns, passwords, ops };
                 const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -258,6 +270,13 @@
                 reader.readAsText(file);
             };
 
+            // REINICIALIZAR COLUNAS PADRÃO (Caso precise restaurar visão original)
+            const handleResetDefaultColumns = () => {
+                if (confirm("Deseja restaurar as colunas originais do sistema? Suas OPs serão re-organizadas imediatamente.")) {
+                    saveColumnsConfig(defaultColumnsConfig);
+                }
+            };
+
             // GESTÃO DE COLUNAS/FASES (MOVER, EDITAR, EXCLUIR)
             const handleMoveColumn = (index, direction) => {
                 const newCols = [...columns];
@@ -276,7 +295,7 @@
                 setPhaseFormData({
                     title: col.title,
                     sector: col.sector || 'almoxarifado',
-                    statusId: col.statusId || col.id,
+                    statusId: (col.statusIds || [])[0] || col.id,
                     color: col.color || 'border-indigo-300 bg-indigo-50/20',
                     password: passwords[col.sector] || ''
                 });
@@ -292,7 +311,7 @@
                     const updatedCols = columns.map(c => c.id === editingColumn.id ? {
                         ...c,
                         title: phaseFormData.title,
-                        statusId: statusFormatted,
+                        statusIds: Array.from(new Set([...(c.statusIds || []), statusFormatted])),
                         sector: phaseFormData.sector,
                         color: phaseFormData.color
                     } : c);
@@ -304,7 +323,7 @@
                         title: phaseFormData.title,
                         color: phaseFormData.color,
                         badgeColor: 'bg-indigo-100 text-indigo-800',
-                        statusId: statusFormatted,
+                        statusIds: [statusFormatted],
                         sector: phaseFormData.sector
                     };
                     saveColumnsConfig([...columns, newCol]);
@@ -324,7 +343,7 @@
                     alert("Você deve manter pelo menos uma fase no Kanban.");
                     return;
                 }
-                if (confirm("Tem certeza que deseja excluir esta fase? As OPs nela continuarão salvas no banco.")) {
+                if (confirm("Tem certeza que deseja excluir esta fase? As OPs continuam preservadas no banco.")) {
                     const updatedCols = columns.filter(c => c.id !== colId);
                     saveColumnsConfig(updatedCols);
                 }
@@ -332,13 +351,14 @@
 
             // MOVIMENTAÇÃO DE FASE DA OP (Avançar/Voltar)
             const handleMoveOpPhase = (op, direction) => {
-                const currentIndex = columns.findIndex(c => c.statusId === op.status);
+                const currentIndex = columns.findIndex(c => (c.statusIds || []).includes(op.status));
                 const targetIndex = currentIndex + direction;
 
                 if (targetIndex < 0 || targetIndex >= columns.length) return;
 
                 const targetColumn = columns[targetIndex];
-                triggerPasswordCheck(targetColumn.sector, 'move_phase', { op, nextStatus: targetColumn.statusId });
+                const nextStatus = targetColumn.statusIds[0];
+                triggerPasswordCheck(targetColumn.sector, 'move_phase', { op, nextStatus });
             };
 
             const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
@@ -400,7 +420,7 @@
                         opNumber: op.opNumber || '',
                         model: op.model || '',
                         faccaoDestino: op.faccaoDestino || '',
-                        status: op.status || (columns[0] ? columns[0].statusId : 'pendente'),
+                        status: op.status || (columns[0] ? columns[0].statusIds[0] : 'pendente'),
                         notes: op.notes || '',
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : '',
                         isPriority: op.isPriority || false,
@@ -411,7 +431,7 @@
                     setEditingOp(null);
                     setFormData({ 
                         opNumber: '', model: '', faccaoDestino: '', 
-                        status: columns[0] ? columns[0].statusId : 'pendente', 
+                        status: columns[0] ? columns[0].statusIds[0] : 'pendente', 
                         notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: '' 
                     });
                 }
@@ -435,7 +455,7 @@
                     pdfName: formData.pdfName
                 };
 
-                const currentCol = columns.find(c => c.statusId === formData.status);
+                const currentCol = columns.find(c => (c.statusIds || []).includes(formData.status));
                 const requiredSector = currentCol ? currentCol.sector : 'pcp';
                 triggerPasswordCheck(requiredSector, 'save_op', payload);
             };
@@ -469,7 +489,7 @@
                             </div>
                             <div>
                                 <h1 className="text-lg font-extrabold text-slate-800 leading-tight">Painel de Aviamentos</h1>
-                                <p className="text-xs text-slate-400">Gerenciamento Dinâmico de OPs e Fases</p>
+                                <p className="text-xs text-slate-400">Total no Banco: <strong>{ops.length} OPs</strong></p>
                             </div>
                         </div>
 
@@ -506,12 +526,12 @@
                         </div>
                     </header>
 
-                    {/* Kanban Board Dinâmico */}
+                    {/* Kanban Board Dinâmico e Compatível */}
                     <main className="flex-1 p-6 flex flex-col">
                         <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
-                                {columns.map((col, index) => {
-                                    const colOps = filteredOps.filter(op => op.status === col.statusId);
+                                {columns.map((col) => {
+                                    const colOps = filteredOps.filter(op => (col.statusIds || []).includes(op.status));
                                     return (
                                         <div key={col.id} className={`w-80 flex flex-col border rounded-2xl h-[calc(100vh-180px)] min-h-[480px] ${col.color}`}>
                                             <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/80 rounded-t-2xl">
@@ -563,7 +583,7 @@
                                         >
                                             <i data-lucide="arrow-left" className="w-3.5 h-3.5"></i> Voltar Fase
                                         </button>
-                                        <span className="text-xs font-bold text-indigo-600 uppercase">Fase Atual: {formData.status}</span>
+                                        <span className="text-xs font-bold text-indigo-600 uppercase">Fase: {formData.status}</span>
                                         <button 
                                             type="button"
                                             onClick={() => handleMoveOpPhase(editingOp, 1)}
@@ -590,7 +610,7 @@
                                     <div>
                                         <label className="text-xs font-bold text-slate-600 block mb-1">Fase / Status Atual</label>
                                         <select className="w-full p-2 border rounded-xl text-xs" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                                            {columns.map(c => <option key={c.id} value={c.statusId}>{c.title}</option>)}
+                                            {columns.map(c => <option key={c.id} value={c.statusIds[0]}>{c.title}</option>)}
                                         </select>
                                     </div>
                                     <div>
@@ -608,7 +628,7 @@
                         </div>
                     )}
 
-                    {/* Modal Gerenciador de Fases (Reordenar, Editar e Criar) */}
+                    {/* Modal Gerenciador de Fases (Reordenar, Editar, Resetar e Criar) */}
                     {isManageColumnsOpen && (
                         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 flex flex-col max-h-[90vh]">
@@ -617,15 +637,21 @@
                                     <button onClick={() => setIsManageColumnsOpen(false)}><i data-lucide="x" className="w-5 h-5"></i></button>
                                 </div>
 
+                                <div className="mb-3 text-right">
+                                    <button onClick={handleResetDefaultColumns} className="text-xs font-bold text-red-600 underline hover:text-red-800">
+                                        Restaurar Estrutura de Colunas Padrão
+                                    </button>
+                                </div>
+
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1">
-                                    {/* Lista de Fases Existentes (com botões de reordenar, editar e excluir) */}
+                                    {/* Lista de Fases Existentes */}
                                     <div className="space-y-3">
-                                        <h4 className="text-xs font-bold text-slate-600 uppercase">Fases Atuais (Ordem do Kanban)</h4>
+                                        <h4 className="text-xs font-bold text-slate-600 uppercase">Fases Atuais (Ordem no Kanban)</h4>
                                         {columns.map((col, idx) => (
                                             <div key={col.id} className="p-3 border rounded-xl bg-slate-50 flex items-center justify-between gap-2">
                                                 <div className="flex-1">
                                                     <p className="font-bold text-xs text-slate-800">{col.title}</p>
-                                                    <p className="text-[10px] text-slate-500">Status: {col.statusId} | Setor: {col.sector}</p>
+                                                    <p className="text-[10px] text-slate-500">Setor: {col.sector}</p>
                                                 </div>
                                                 <div className="flex items-center gap-1">
                                                     <button onClick={() => handleMoveColumn(idx, -1)} disabled={idx === 0} className="p-1 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30">
@@ -648,7 +674,7 @@
                                     {/* Form para Criar/Editar Fase */}
                                     <form onSubmit={handleSavePhase} className="space-y-3 bg-slate-50 p-4 border rounded-xl">
                                         <h4 className="text-xs font-bold text-indigo-700 uppercase">
-                                            {editingColumn ? 'Editar Fase Selected' : 'Criar Nova Fase'}
+                                            {editingColumn ? 'Editar Fase Selecionada' : 'Criar Nova Fase'}
                                         </h4>
                                         <div>
                                             <label className="text-xs font-bold text-slate-600 block mb-1">Título da Coluna *</label>
@@ -668,7 +694,7 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Senha de Validação do Setor</label>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Senha do Setor</label>
                                             <input type="password" placeholder="Digite para alterar..." className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.password} onChange={e => setPhaseFormData({...phaseFormData, password: e.target.value})} />
                                         </div>
                                         <div className="flex gap-2 pt-2">
