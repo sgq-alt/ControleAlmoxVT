@@ -62,11 +62,12 @@
             { id: 'completo', label: 'Finalizado (Entregue)', sector: 'finalizado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', borderColor: 'border-emerald-500' }
         ];
 
+        // Mapeamento das colunas com suporte a todas as variações de status do banco
         const defaultColumnsConfig = [
-            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente'], sector: 'pcp' },
-            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'aguardando_compra', 'parcial'], sector: 'almoxarifado' },
-            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao'], sector: 'distribuicao' },
-            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo'], sector: 'finalizado' }
+            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente', 'pcp', 'pendentes'], sector: 'pcp' },
+            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'], sector: 'almoxarifado' },
+            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao', 'distribuicao'], sector: 'distribuicao' },
+            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo', 'finalizado', 'entregue'], sector: 'finalizado' }
         ];
 
         let db = null;
@@ -97,6 +98,17 @@
             return now > limit ? { status: 'late', text: 'Atrasado' } : { status: 'ok', text: 'No Prazo' };
         };
 
+        // Função de normalização para enquadrar status legados de forma garantida
+        const normalizeStatus = (rawStatus) => {
+            if (!rawStatus) return 'pendente';
+            const status = String(rawStatus).toLowerCase().trim();
+            if (['pendente', 'pcp', 'pendentes'].includes(status)) return 'pendente';
+            if (['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'].includes(status)) return status;
+            if (['em_distribuicao', 'distribuicao'].includes(status)) return 'em_distribuicao';
+            if (['completo', 'finalizado', 'entregue'].includes(status)) return 'completo';
+            return 'pendente';
+        };
+
         const App = () => {
             const [ops, setOps] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
@@ -106,7 +118,6 @@
             const [dbStatus, setDbStatus] = useState('conectando');
             const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-            // Gerenciador de Colunas
             const [columns, setColumns] = useState(() => {
                 const saved = localStorage.getItem('ops_columns_config');
                 if (!saved) return defaultColumnsConfig;
@@ -124,12 +135,10 @@
             const [isManageColumnsOpen, setIsManageColumnsOpen] = useState(false);
             const [editingColumn, setEditingColumn] = useState(null);
 
-            // Histórico
             const [isHistoryOpen, setIsHistoryOpen] = useState(false);
             const [historySearchTerm, setHistorySearchTerm] = useState('');
             const [historyDateFilter, setHistoryDateFilter] = useState('all');
 
-            // Senhas
             const [passwords, setPasswords] = useState(() => {
                 const saved = localStorage.getItem('ops_passwords');
                 return saved ? JSON.parse(saved) : { pcp: '123456', almoxarifado: '112233', distribuicao: '334455' };
@@ -139,14 +148,12 @@
                 isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null 
             });
 
-            // Form de OP
             const [formData, setFormData] = useState({
                 opNumber: '', model: '', faccaoDestino: '', status: 'pendente', notes: '', slaDeadline: '', isPriority: false, pdfBase64: '', pdfName: ''
             });
 
             const [newChecklistItem, setNewChecklistItem] = useState('');
 
-            // Form de Fase
             const [phaseFormData, setPhaseFormData] = useState({
                 title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: ''
             });
@@ -222,7 +229,7 @@
 
                 const dataToExport = ops.map(op => {
                     const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                    const isFinalizada = op.status === 'completo';
+                    const isFinalizada = normalizeStatus(op.status) === 'completo';
                     return {
                         "Número OP": op.opNumber || '',
                         "Modelo / Referência": op.model || '',
@@ -234,8 +241,7 @@
                         "Prazo SLA": formatDateTime(op.slaDeadline),
                         "Data Conclusão": formatDateTime(op.completedTime),
                         "Status SLA": sla.text,
-                        "Observações": op.notes || '',
-                        "Checklist": (op.items || []).map(i => `${i.name} (${i.checked ? 'OK' : 'PENDENTE'})`).join(' | ')
+                        "Observações": op.notes || ''
                     };
                 });
 
@@ -247,7 +253,7 @@
 
             // BACKUP JSON GERAL
             const handleExportBackupJSON = () => {
-                const backupPayload = { version: "2.3", columns, passwords, ops };
+                const backupPayload = { version: "2.4", columns, passwords, ops };
                 const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -289,7 +295,7 @@
                 reader.readAsText(file);
             };
 
-            // GESTÃO DE COLUNAS/FASES
+            // GESTÃO DE FASES
             const handleMoveColumn = (index, direction) => {
                 const newCols = [...columns];
                 const targetIndex = index + direction;
@@ -355,13 +361,12 @@
                     alert("Você deve manter pelo menos uma fase no Kanban.");
                     return;
                 }
-                if (confirm("Tem certeza que deseja excluir esta fase? As OPs continuam preservadas no banco.")) {
+                if (confirm("Tem certeza que deseja excluir esta fase?")) {
                     const updatedCols = columns.filter(c => c.id !== colId);
                     saveColumnsConfig(updatedCols);
                 }
             };
 
-            // MODAL E FORMULARIO DE OP
             const handleOpenModal = (op = null) => {
                 if (op) {
                     setEditingOp(op);
@@ -369,7 +374,7 @@
                         opNumber: op.opNumber || '',
                         model: op.model || '',
                         faccaoDestino: op.faccaoDestino || '',
-                        status: op.status || 'pendente',
+                        status: normalizeStatus(op.status),
                         notes: op.notes || '',
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: op.isPriority || false,
@@ -401,24 +406,17 @@
             const handlePdfUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-
                 if (file.type !== "application/pdf") {
                     alert("Apenas arquivos PDF são aceitos!");
                     return;
                 }
-
                 if (file.size > 800 * 1024) {
                     alert("O arquivo PDF ultrapassou o limite de 800KB.");
                     return;
                 }
-
                 const reader = new FileReader();
                 reader.onload = () => {
-                    setFormData(prev => ({
-                        ...prev,
-                        pdfBase64: reader.result,
-                        pdfName: file.name
-                    }));
+                    setFormData(prev => ({ ...prev, pdfBase64: reader.result, pdfName: file.name }));
                 };
                 reader.readAsDataURL(file);
             };
@@ -520,9 +518,9 @@
 
             const executeSaveOp = (opToSave) => {
                 let finalOp = { ...opToSave };
-                if (opToSave.status === 'completo' && !opToSave.completedTime) {
+                if (normalizeStatus(opToSave.status) === 'completo' && !opToSave.completedTime) {
                     finalOp.completedTime = new Date().toISOString();
-                } else if (opToSave.status !== 'completo') {
+                } else if (normalizeStatus(opToSave.status) !== 'completo') {
                     finalOp.completedTime = null;
                 }
                 saveOpToDb(finalOp);
@@ -551,7 +549,7 @@
             };
 
             const isCompletedAndOld = (op) => {
-                if (op.status !== 'completo' || !op.completedTime) return false;
+                if (normalizeStatus(op.status) !== 'completo' || !op.completedTime) return false;
                 return (new Date().getTime() - new Date(op.completedTime).getTime()) / (1000 * 60 * 60) >= 24; 
             };
 
@@ -562,7 +560,7 @@
                 (op.faccaoDestino || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
 
-            const allCompletedOps = ops.filter(op => op.status === 'completo');
+            const allCompletedOps = ops.filter(op => normalizeStatus(op.status) === 'completo');
 
             const filteredHistoryOps = allCompletedOps.filter(op => {
                 const matchesSearch = 
@@ -582,17 +580,18 @@
                 return true;
             }).sort((a, b) => new Date(b.completedTime || 0) - new Date(a.completedTime || 0));
 
-            // KPIs exatamente como no layout da Imagem 2
-            const totalOpsAtivas = visibleOps.filter(op => op.status !== 'completo').length;
-            const inSeparacaoOps = visibleOps.filter(op => ['em_separacao', 'aguardando_compra', 'parcial'].includes(op.status)).length;
-            const inDistribuicaoOps = visibleOps.filter(op => op.status === 'em_distribuicao').length;
-            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && op.status !== 'completo').length;
-            const completedOpsCount = visibleOps.filter(op => op.status === 'completo').length;
+            // KPIs - Contagem exata conforme solicitado
+            const totalOpsAtivas = visibleOps.filter(op => normalizeStatus(op.status) !== 'completo').length;
+            const inSeparacaoOps = visibleOps.filter(op => ['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'].includes(normalizeStatus(op.status))).length;
+            const inDistribuicaoOps = visibleOps.filter(op => normalizeStatus(op.status) === 'em_distribuicao').length;
+            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && normalizeStatus(op.status) !== 'completo').length;
+            const completedOpsCount = visibleOps.filter(op => normalizeStatus(op.status) === 'completo').length;
 
             const renderCard = (op) => {
+                const normalizedStat = normalizeStatus(op.status);
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                const isLate = sla.status === 'late' && op.status !== 'completo';
-                const currentStatusObj = statusOptions.find(s => s.id === op.status) || statusOptions[0];
+                const isLate = sla.status === 'late' && normalizedStat !== 'completo';
+                const currentStatusObj = statusOptions.find(s => s.id === normalizedStat) || statusOptions[0];
 
                 return (
                     <div 
@@ -615,7 +614,7 @@
                             </div>
                             
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : op.status === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
+                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : normalizedStat === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
                             }`}>
                                 {sla.text}
                             </span>
@@ -723,7 +722,7 @@
                         </div>
                     </header>
 
-                    {/* Resumo/KPIs do Topo - Idêntico ao Layout da Imagem 2 */}
+                    {/* Resumo/KPIs do Topo - Exatamente como na Imagem 2 */}
                     <main className="flex-1 p-6 flex flex-col">
                         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                             <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
@@ -753,7 +752,7 @@
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
                                 {columns.map((col) => {
                                     const colOps = filteredOps
-                                        .filter(op => (col.statusIds || []).includes(op.status))
+                                        .filter(op => (col.statusIds || []).includes(normalizeStatus(op.status)))
                                         .sort((a, b) => {
                                             if (a.isPriority && !b.isPriority) return -1;
                                             if (!a.isPriority && b.isPriority) return 1;
@@ -781,7 +780,7 @@
                         </div>
                     </main>
 
-                    {/* Modal Detalhes/Edição da OP - Idêntico ao Layout da Imagem 1 */}
+                    {/* Modal Detalhes/Edição da OP - Idêntico à Imagem 1 */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -819,7 +818,7 @@
                                                 <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> AVANCE A FASE DA OP
                                             </h4>
                                             
-                                            {editingOp.status !== 'em_distribuicao' && editingOp.status !== 'completo' && (
+                                            {normalizeStatus(editingOp.status) !== 'em_distribuicao' && normalizeStatus(editingOp.status) !== 'completo' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50/80 p-3 rounded-lg border border-blue-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-blue-900">Confirmar Separação dos Aviamentos</p>
@@ -831,7 +830,7 @@
                                                 </div>
                                             )}
 
-                                            {editingOp.status === 'em_distribuicao' && (
+                                            {normalizeStatus(editingOp.status) === 'em_distribuicao' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50/80 p-3 rounded-lg border border-purple-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-purple-900">Confirmar Entrega / Distribuição Concluída</p>
