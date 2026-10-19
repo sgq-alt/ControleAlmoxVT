@@ -15,7 +15,7 @@
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Firebase v9 Compat -->
+    <!-- SDKs do Firebase v9 Compat -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
@@ -23,7 +23,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- SheetJS (XLSX) -->
+    <!-- SheetJS (XLSX) para Exportação Excel -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     
     <!-- Fonte Inter -->
@@ -35,6 +35,12 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.6; }
+            100% { transform: scale(0.95); opacity: 1; }
+        }
+        .pulse-priority { animation: pulse-ring 2s infinite ease-in-out; }
     </style>
 </head>
 <body>
@@ -62,11 +68,11 @@
             { id: 'completo', label: 'Finalizado (Entregue)', sector: 'finalizado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', borderColor: 'border-emerald-500' }
         ];
 
-        const defaultColumnsConfig = [
-            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente'], sector: 'pcp' },
-            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'aguardando_compra', 'parcial'], sector: 'almoxarifado' },
-            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao'], sector: 'distribuicao' },
-            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo'], sector: 'finalizado' }
+        const columnsConfig = [
+            { id: 'pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statuses: ['pendente'] },
+            { id: 'almoxarifado', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statuses: ['em_separacao', 'aguardando_compra', 'parcial'] },
+            { id: 'distribuicao', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statuses: ['em_distribuicao'] },
+            { id: 'finalizado', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statuses: ['completo'] }
         ];
 
         let db = null;
@@ -79,7 +85,7 @@
             auth = firebase.auth();
             firebaseOnline = true;
         } catch (error) {
-            console.warn("Firebase offline. Ativando contingência.", error);
+            console.warn("Falha ao inicializar o Firebase. Ativando contingência offline.", error);
         }
 
         const formatDateTime = (dateString) => {
@@ -97,19 +103,6 @@
             return now > limit ? { status: 'late', text: 'Atrasado' } : { status: 'ok', text: 'No Prazo' };
         };
 
-        // Normalização rígida de status para evitar registros fantasma ou nulos
-        const getCleanStatus = (rawStatus) => {
-            if (!rawStatus) return 'pendente';
-            const str = String(rawStatus).toLowerCase().trim();
-            if (['pendente', 'pcp', 'pendentes'].includes(str)) return 'pendente';
-            if (['em_separacao', 'separacao'].includes(str)) return 'em_separacao';
-            if (['aguardando_compra'].includes(str)) return 'aguardando_compra';
-            if (['parcial'].includes(str)) return 'parcial';
-            if (['em_distribuicao', 'distribuicao'].includes(str)) return 'em_distribuicao';
-            if (['completo', 'finalizado', 'entregue'].includes(str)) return 'completo';
-            return 'pendente';
-        };
-
         const App = () => {
             const [ops, setOps] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
@@ -118,19 +111,6 @@
             const [userRole, setUserRole] = useState('pcp');
             const [dbStatus, setDbStatus] = useState('conectando');
             const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-            const [columns, setColumns] = useState(() => {
-                const saved = localStorage.getItem('ops_columns_config');
-                if (!saved) return defaultColumnsConfig;
-                try {
-                    return JSON.parse(saved);
-                } catch (e) {
-                    return defaultColumnsConfig;
-                }
-            });
-
-            const [isManageColumnsOpen, setIsManageColumnsOpen] = useState(false);
-            const [editingColumn, setEditingColumn] = useState(null);
 
             const [isHistoryOpen, setIsHistoryOpen] = useState(false);
             const [historySearchTerm, setHistorySearchTerm] = useState('');
@@ -151,10 +131,6 @@
 
             const [newChecklistItem, setNewChecklistItem] = useState('');
 
-            const [phaseFormData, setPhaseFormData] = useState({
-                title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: ''
-            });
-
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
             });
@@ -167,25 +143,28 @@
                 }
                 auth.signInAnonymously()
                     .then(() => setIsAuthenticated(true))
-                    .catch(() => { setDbStatus('offline'); loadLocalData(); });
+                    .catch((err) => {
+                        setDbStatus('offline');
+                        loadLocalData();
+                    });
             }, []);
 
             useEffect(() => {
                 if (!isAuthenticated || !db) return;
                 setDbStatus('conectando');
+                
                 const unsubscribe = db.collection('ops_aviamentos').onSnapshot((snapshot) => {
                     const loadedOps = [];
                     snapshot.forEach(doc => {
-                        const data = doc.data();
-                        // Garante id único e elimina documentos sem opNumber
-                        if (data && (data.opNumber || data.model)) {
-                            loadedOps.push({ id: doc.id, ...data, status: getCleanStatus(data.status) });
-                        }
+                        loadedOps.push({ id: doc.id, ...doc.data() });
                     });
                     setOps(loadedOps);
                     setDbStatus('online');
                     localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
-                }, () => { setDbStatus('offline'); loadLocalData(); });
+                }, (error) => {
+                    setDbStatus('offline');
+                    loadLocalData();
+                });
 
                 return () => unsubscribe();
             }, [isAuthenticated]);
@@ -193,19 +172,16 @@
             const loadLocalData = () => {
                 const cached = localStorage.getItem('ops_aviamentos_cache');
                 if (cached) {
-                    try {
-                        setOps(JSON.parse(cached));
-                    } catch(e) {}
+                    try { setOps(JSON.parse(cached)); } catch (e) {}
                 }
             };
 
             const saveOpToDb = (updatedOp) => {
-                const cleanOp = { ...updatedOp, status: getCleanStatus(updatedOp.status) };
                 if (dbStatus === 'online' && db) {
-                    db.collection('ops_aviamentos').doc(cleanOp.id).set(cleanOp)
-                        .catch(() => updateLocalState(cleanOp));
+                    db.collection('ops_aviamentos').doc(updatedOp.id).set(updatedOp)
+                        .catch(() => updateLocalState(updatedOp));
                 } else {
-                    updateLocalState(cleanOp);
+                    updateLocalState(updatedOp);
                 }
             };
 
@@ -216,11 +192,6 @@
                 localStorage.setItem('ops_aviamentos_cache', JSON.stringify(newOps));
             };
 
-            const saveColumnsConfig = (newCols) => {
-                setColumns(newCols);
-                localStorage.setItem('ops_columns_config', JSON.stringify(newCols));
-            };
-
             const getSuggestedSla = () => {
                 const date = new Date();
                 date.setHours(date.getHours() + 24);
@@ -228,16 +199,16 @@
                 return (new Date(date - tzOffset)).toISOString().slice(0, 16);
             };
 
-            // EXPORTAÇÃO EXCEL
+            // EXPORTAÇÃO EXCEL DA BASE COMPLETA
             const handleExportToExcel = () => {
                 if (typeof XLSX === 'undefined') {
-                    alert("Biblioteca Excel carregando, aguarde...");
+                    alert("Carregando módulo do Excel, tente em alguns segundos.");
                     return;
                 }
 
                 const dataToExport = ops.map(op => {
                     const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                    const isFinalizada = getCleanStatus(op.status) === 'completo';
+                    const isFinalizada = op.status === 'completo';
                     return {
                         "Número OP": op.opNumber || '',
                         "Modelo / Referência": op.model || '',
@@ -255,124 +226,8 @@
 
                 const worksheet = XLSX.utils.json_to_sheet(dataToExport);
                 const workbook = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook, worksheet, "Ordens");
-                XLSX.writeFile(workbook, `Relatorio_OPs_${new Date().toISOString().slice(0, 10)}.xlsx`);
-            };
-
-            // BACKUP JSON GERAL
-            const handleExportBackupJSON = () => {
-                const backupPayload = { version: "2.5", columns, passwords, ops };
-                const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `Backup_OPs_${new Date().toISOString().slice(0, 10)}.json`;
-                a.click();
-            };
-
-            const handleImportBackupJSON = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const importedData = JSON.parse(event.target.result);
-                        if (!importedData.ops || !Array.isArray(importedData.ops)) {
-                            alert("Arquivo de backup inválido!");
-                            return;
-                        }
-
-                        if (confirm(`Restaurar ${importedData.ops.length} OPs?`)) {
-                            setOps(importedData.ops);
-                            localStorage.setItem('ops_aviamentos_cache', JSON.stringify(importedData.ops));
-                            if (importedData.columns) saveColumnsConfig(importedData.columns);
-                            if (importedData.passwords) {
-                                setPasswords(importedData.passwords);
-                                localStorage.setItem('ops_passwords', JSON.stringify(importedData.passwords));
-                            }
-                            if (dbStatus === 'online' && db) {
-                                importedData.ops.forEach(op => db.collection('ops_aviamentos').doc(op.id).set(op));
-                            }
-                            alert("Restauração efetuada com sucesso!");
-                        }
-                    } catch (err) {
-                        alert("Erro ao restaurar backup.");
-                    }
-                };
-                reader.readAsText(file);
-            };
-
-            // GESTÃO DE FASES
-            const handleMoveColumn = (index, direction) => {
-                const newCols = [...columns];
-                const targetIndex = index + direction;
-                if (targetIndex < 0 || targetIndex >= newCols.length) return;
-
-                const temp = newCols[index];
-                newCols[index] = newCols[targetIndex];
-                newCols[targetIndex] = temp;
-
-                saveColumnsConfig(newCols);
-            };
-
-            const handleStartEditColumn = (col) => {
-                setEditingColumn(col);
-                setPhaseFormData({
-                    title: col.title,
-                    sector: col.sector || 'almoxarifado',
-                    statusId: (col.statusIds || [])[0] || col.id,
-                    color: col.color || 'border-indigo-300 bg-indigo-50/20',
-                    password: passwords[col.sector] || ''
-                });
-            };
-
-            const handleSavePhase = (e) => {
-                e.preventDefault();
-                if (!phaseFormData.title || !phaseFormData.statusId) return;
-
-                const statusFormatted = phaseFormData.statusId.toLowerCase().replace(/\s+/g, '_');
-
-                if (editingColumn) {
-                    const updatedCols = columns.map(c => c.id === editingColumn.id ? {
-                        ...c,
-                        title: phaseFormData.title,
-                        statusIds: Array.from(new Set([...(c.statusIds || []), statusFormatted])),
-                        sector: phaseFormData.sector,
-                        color: phaseFormData.color
-                    } : c);
-                    saveColumnsConfig(updatedCols);
-                    setEditingColumn(null);
-                } else {
-                    const newCol = {
-                        id: `col_${Date.now()}`,
-                        title: phaseFormData.title,
-                        color: phaseFormData.color,
-                        badgeColor: 'bg-indigo-100 text-indigo-800',
-                        statusIds: [statusFormatted],
-                        sector: phaseFormData.sector
-                    };
-                    saveColumnsConfig([...columns, newCol]);
-                }
-
-                if (phaseFormData.password) {
-                    const newPasses = { ...passwords, [phaseFormData.sector]: phaseFormData.password };
-                    setPasswords(newPasses);
-                    localStorage.setItem('ops_passwords', JSON.stringify(newPasses));
-                }
-
-                setPhaseFormData({ title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: '' });
-            };
-
-            const handleDeleteColumn = (colId) => {
-                if (columns.length <= 1) {
-                    alert("Você deve manter pelo menos uma fase no Kanban.");
-                    return;
-                }
-                if (confirm("Tem certeza que deseja excluir esta fase?")) {
-                    const updatedCols = columns.filter(c => c.id !== colId);
-                    saveColumnsConfig(updatedCols);
-                }
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Ordens de Servico");
+                XLSX.writeFile(workbook, `Relatorio_OPs_Aviamentos_${new Date().toISOString().slice(0, 10)}.xlsx`);
             };
 
             const handleOpenModal = (op = null) => {
@@ -382,7 +237,7 @@
                         opNumber: op.opNumber || '',
                         model: op.model || '',
                         faccaoDestino: op.faccaoDestino || '',
-                        status: getCleanStatus(op.status),
+                        status: op.status || 'pendente',
                         notes: op.notes || '',
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: op.isPriority || false,
@@ -392,15 +247,8 @@
                 } else {
                     setEditingOp(null);
                     setFormData({ 
-                        opNumber: '', 
-                        model: '', 
-                        faccaoDestino: '', 
-                        status: 'pendente', 
-                        notes: '', 
-                        slaDeadline: getSuggestedSla(),
-                        isPriority: false,
-                        pdfBase64: '',
-                        pdfName: ''
+                        opNumber: '', model: '', faccaoDestino: '', status: 'pendente', 
+                        notes: '', slaDeadline: getSuggestedSla(), isPriority: false, pdfBase64: '', pdfName: '' 
                     });
                 }
                 setIsModalOpen(true);
@@ -415,7 +263,7 @@
                 const file = e.target.files[0];
                 if (!file) return;
                 if (file.type !== "application/pdf") {
-                    alert("Apenas arquivos PDF são aceitos!");
+                    alert("Apenas arquivos no formato PDF são aceitos!");
                     return;
                 }
                 if (file.size > 800 * 1024) {
@@ -431,19 +279,14 @@
 
             const triggerPasswordCheck = (requiredRole, actionType, actionData = null) => {
                 setPasswordModal({
-                    isOpen: true,
-                    requiredRole: requiredRole,
-                    actionType: actionType,
-                    password: '',
-                    error: '',
-                    actionData: actionData
+                    isOpen: true, requiredRole, actionType, password: '', error: '', actionData
                 });
             };
 
             const handleVerifyPassword = (e) => {
                 e.preventDefault();
                 const requiredRole = passwordModal.requiredRole;
-                const correctPassword = passwords[requiredRole] || '123456';
+                const correctPassword = passwords[requiredRole];
 
                 if (passwordModal.password !== correctPassword) {
                     setPasswordModal(prev => ({ ...prev, error: `Senha do setor incorreta!` }));
@@ -456,7 +299,7 @@
                 setPasswordModal({ isOpen: false, requiredRole: 'pcp', actionType: '', password: '', error: '', actionData: null });
 
                 if (action === 'delete') executeDeleteOp(data.id);
-                else if (action === 'allow_edit') handleOpenModal(data);
+                else if (action === 'allow_edit') { setEditingOp(data); handleOpenModal(data); }
                 else if (action === 'save_edit') executeSaveOp(data);
                 else if (action === 'confirm_separacao') executeMoveToDistribicao(data);
                 else if (action === 'confirm_distribuicao') executeMoveToFinalizados(data);
@@ -474,21 +317,13 @@
             };
 
             const executeMoveToDistribicao = (opToMove) => {
-                const updatedOp = {
-                    ...opToMove,
-                    status: 'em_distribuicao',
-                    separationConfirmedAt: new Date().toISOString()
-                };
+                const updatedOp = { ...opToMove, status: 'em_distribuicao', separationConfirmedAt: new Date().toISOString() };
                 saveOpToDb(updatedOp);
                 handleCloseModal();
             };
 
             const executeMoveToFinalizados = (opToMove) => {
-                const updatedOp = {
-                    ...opToMove,
-                    status: 'completo',
-                    completedTime: new Date().toISOString()
-                };
+                const updatedOp = { ...opToMove, status: 'completo', completedTime: new Date().toISOString() };
                 saveOpToDb(updatedOp);
                 handleCloseModal();
             };
@@ -525,10 +360,10 @@
             };
 
             const executeSaveOp = (opToSave) => {
-                let finalOp = { ...opToSave, status: getCleanStatus(opToSave.status) };
-                if (finalOp.status === 'completo' && !finalOp.completedTime) {
+                let finalOp = { ...opToSave };
+                if (opToSave.status === 'completo' && !opToSave.completedTime) {
                     finalOp.completedTime = new Date().toISOString();
-                } else if (finalOp.status !== 'completo') {
+                } else if (opToSave.status !== 'completo') {
                     finalOp.completedTime = null;
                 }
                 saveOpToDb(finalOp);
@@ -557,7 +392,7 @@
             };
 
             const isCompletedAndOld = (op) => {
-                if (getCleanStatus(op.status) !== 'completo' || !op.completedTime) return false;
+                if (op.status !== 'completo' || !op.completedTime) return false;
                 return (new Date().getTime() - new Date(op.completedTime).getTime()) / (1000 * 60 * 60) >= 24; 
             };
 
@@ -568,7 +403,7 @@
                 (op.faccaoDestino || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
 
-            const allCompletedOps = ops.filter(op => getCleanStatus(op.status) === 'completo');
+            const allCompletedOps = ops.filter(op => op.status === 'completo');
 
             const filteredHistoryOps = allCompletedOps.filter(op => {
                 const matchesSearch = 
@@ -579,27 +414,23 @@
                 if (!matchesSearch) return false;
 
                 if (historyDateFilter === '7days') {
-                    const completedDate = new Date(op.completedTime || op.requestTime);
-                    return (new Date() - completedDate) / (1000 * 60 * 60 * 24) <= 7;
+                    return (new Date() - new Date(op.completedTime || op.requestTime)) / (1000 * 60 * 60 * 24) <= 7;
                 } else if (historyDateFilter === '30days') {
-                    const completedDate = new Date(op.completedTime || op.requestTime);
-                    return (new Date() - completedDate) / (1000 * 60 * 60 * 24) <= 30;
+                    return (new Date() - new Date(op.completedTime || op.requestTime)) / (1000 * 60 * 60 * 24) <= 30;
                 }
                 return true;
             }).sort((a, b) => new Date(b.completedTime || 0) - new Date(a.completedTime || 0));
 
-            // KPIs Fidedignos
-            const totalOpsAtivas = visibleOps.filter(op => getCleanStatus(op.status) !== 'completo').length;
-            const inSeparacaoOps = visibleOps.filter(op => ['em_separacao', 'aguardando_compra', 'parcial'].includes(getCleanStatus(op.status))).length;
-            const inDistribuicaoOps = visibleOps.filter(op => getCleanStatus(op.status) === 'em_distribuicao').length;
-            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && getCleanStatus(op.status) !== 'completo').length;
-            const completedOpsCount = visibleOps.filter(op => getCleanStatus(op.status) === 'completo').length;
+            const totalOps = visibleOps.length;
+            const completedOps = visibleOps.filter(op => op.status === 'completo').length;
+            const inDistribuicaoOps = visibleOps.filter(op => op.status === 'em_distribuicao').length;
+            const pendingOps = totalOps - completedOps;
+            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && op.status !== 'completo').length;
 
             const renderCard = (op) => {
-                const cleanStat = getCleanStatus(op.status);
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                const isLate = sla.status === 'late' && cleanStat !== 'completo';
-                const currentStatusObj = statusOptions.find(s => s.id === cleanStat) || statusOptions[0];
+                const isLate = sla.status === 'late' && op.status !== 'completo';
+                const currentStatusObj = statusOptions.find(s => s.id === op.status) || statusOptions[0];
 
                 return (
                     <div 
@@ -622,7 +453,7 @@
                             </div>
                             
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : cleanStat === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
+                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : op.status === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
                             }`}>
                                 {sla.text}
                             </span>
@@ -697,70 +528,57 @@
                             </div>
 
                             <button onClick={handleExportToExcel} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm">
-                                <i data-lucide="file-spreadsheet" className="w-4 h-4"></i> Excel
+                                <i data-lucide="file-spreadsheet" className="w-4 h-4"></i> Exportar Excel
                             </button>
 
-                            <button onClick={() => setIsManageColumnsOpen(true)} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold">
-                                <i data-lucide="sliders" className="w-4 h-4"></i> Configurar Fases
+                            <button onClick={() => setIsHistoryOpen(true)} className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm">
+                                <i data-lucide="history" className="w-4 h-4 text-emerald-600"></i> Histórico ({allCompletedOps.length})
                             </button>
 
-                            <button onClick={handleExportBackupJSON} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold">
-                                <i data-lucide="download" className="w-4 h-4"></i> Backup
-                            </button>
-
-                            <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer">
-                                <i data-lucide="upload" className="w-4 h-4"></i> Restaurar
-                                <input type="file" accept=".json" onChange={handleImportBackupJSON} className="hidden" />
-                            </label>
-
-                            <button onClick={() => setIsHistoryOpen(true)} className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 transition-all flex items-center gap-1.5 text-xs font-bold">
-                                <i data-lucide="history" className="w-4 h-4"></i> Histórico ({allCompletedOps.length})
-                            </button>
-
-                            <div className="relative w-full md:w-48">
+                            <div className="relative w-full md:w-56">
                                 <i data-lucide="search" className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
                                 <input type="text" placeholder="Buscar OP, Modelo..." className="pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs outline-none w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                             </div>
                             
                             {userRole === 'pcp' && (
-                                <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                                <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-100">
                                     <i data-lucide="plus" className="w-4 h-4"></i> Nova OP
                                 </button>
                             )}
                         </div>
                     </header>
 
-                    {/* Resumo/KPIs do Topo - Imagem 2 */}
+                    {/* Resumo do Topo (KPIs) - Idêntico ao Layout Original */}
                     <main className="flex-1 p-6 flex flex-col">
                         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 rounded-xl text-blue-600"><i data-lucide="file-text" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ativas</p><p className="text-xl font-extrabold text-slate-800">{totalOpsAtivas}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ativas</p><p className="text-xl font-extrabold text-slate-800">{totalOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                                <div className="p-3 bg-amber-50 rounded-xl text-amber-600"><i data-lucide="timer" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Em Separação</p><p className="text-xl font-extrabold text-slate-800">{inSeparacaoOps}</p></div>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-yellow-50 rounded-xl text-yellow-600"><i data-lucide="timer" className="w-5 h-5"></i></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Em Separação</p><p className="text-xl font-extrabold text-slate-800">{pendingOps - inDistribuicaoOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-purple-50 rounded-xl text-purple-600"><i data-lucide="truck" className="w-5 h-5"></i></div>
                                 <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Distribuição</p><p className="text-xl font-extrabold text-slate-800">{inDistribuicaoOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-red-50 rounded-xl text-red-600"><i data-lucide="alert-octagon" className="w-5 h-5"></i></div>
                                 <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atrasadas</p><p className="text-xl font-extrabold text-slate-800">{lateOps}</p></div>
                             </div>
-                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600"><i data-lucide="check-circle-2" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Finalizadas</p><p className="text-xl font-extrabold text-slate-800">{completedOpsCount}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Finalizadas</p><p className="text-xl font-extrabold text-slate-800">{completedOps}</p></div>
                             </div>
                         </div>
 
-                        {/* Kanban Filtro por Pertencimento Único */}
+                        {/* Kanban Principal */}
                         <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
-                                {columns.map((col) => {
+                                {columnsConfig.map(col => {
                                     const colOps = filteredOps
-                                        .filter(op => (col.statusIds || []).includes(getCleanStatus(op.status)))
+                                        .filter(op => col.statuses.includes(op.status))
                                         .sort((a, b) => {
                                             if (a.isPriority && !b.isPriority) return -1;
                                             if (!a.isPriority && b.isPriority) return 1;
@@ -770,7 +588,7 @@
                                     return (
                                         <div key={col.id} className={`w-80 flex flex-col border rounded-2xl h-[calc(100vh-280px)] min-h-[480px] ${col.color}`}>
                                             <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/80 rounded-t-2xl">
-                                                <h3 className="font-bold text-slate-700 text-xs">{col.title}</h3>
+                                                <h3 className="font-bold text-slate-700 text-xs flex items-center gap-2">{col.title}</h3>
                                                 <span className={`text-[10px] py-0.5 px-2 rounded-full font-bold ${col.badgeColor}`}>{colOps.length}</span>
                                             </div>
                                             <div className="p-3 overflow-y-auto flex-1 custom-scrollbar">
@@ -788,7 +606,7 @@
                         </div>
                     </main>
 
-                    {/* Modal Detalhes/Edição da OP - Imagem 1 */}
+                    {/* Modal Detalhes/Edição da OP */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -797,9 +615,7 @@
                                         <i data-lucide="edit-3" className="w-4 h-4"></i>
                                         {editingOp ? `OP: ${editingOp.opNumber}` : 'Nova Ordem de Aviamento (PCP)'}
                                     </h2>
-                                    <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600">
-                                        <i data-lucide="x" className="w-5 h-5"></i>
-                                    </button>
+                                    <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600"><i data-lucide="x" className="w-5 h-5"></i></button>
                                 </div>
                                 
                                 <div className="p-6 overflow-y-auto flex-1 space-y-5">
@@ -819,14 +635,14 @@
                                         </div>
                                     )}
 
-                                    {/* Ações Específicas de Transição de Etapas da Imagem 1 */}
+                                    {/* Ações Específicas de Transição de Etapas */}
                                     {editingOp && (
                                         <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                                             <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                                                 <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> AVANCE A FASE DA OP
                                             </h4>
                                             
-                                            {getCleanStatus(editingOp.status) !== 'em_distribuicao' && getCleanStatus(editingOp.status) !== 'completo' && (
+                                            {editingOp.status !== 'em_distribuicao' && editingOp.status !== 'completo' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50/80 p-3 rounded-lg border border-blue-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-blue-900">Confirmar Separação dos Aviamentos</p>
@@ -838,7 +654,7 @@
                                                 </div>
                                             )}
 
-                                            {getCleanStatus(editingOp.status) === 'em_distribuicao' && (
+                                            {editingOp.status === 'em_distribuicao' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50/80 p-3 rounded-lg border border-purple-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-purple-900">Confirmar Entrega / Distribuição Concluída</p>
@@ -856,18 +672,18 @@
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Número da OP *</label>
-                                                <input type="text" required placeholder="Ex: 2647012 ATÉ 2647017" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.opNumber} onChange={e => setFormData({...formData, opNumber: e.target.value})} disabled={!!editingOp || userRole !== 'pcp'} />
+                                                <input type="text" required placeholder="Ex: OP-4780" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.opNumber} onChange={e => setFormData({...formData, opNumber: e.target.value})} disabled={!!editingOp || userRole !== 'pcp'} />
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Modelo / Referência *</label>
-                                                <input type="text" required placeholder="Ex: BERMUDA ASSAÍ" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} disabled={!!editingOp || userRole !== 'pcp'} />
+                                                <input type="text" required placeholder="Ex: Camisa Social Slim" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} disabled={!!editingOp || userRole !== 'pcp'} />
                                             </div>
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Facção de Destino *</label>
-                                                <input type="text" required placeholder="Ex: COSTURA" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.faccaoDestino} onChange={e => setFormData({...formData, faccaoDestino: e.target.value})} disabled={userRole !== 'pcp'} />
+                                                <input type="text" required placeholder="Ex: Oficina Estrela" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:text-slate-400" value={formData.faccaoDestino} onChange={e => setFormData({...formData, faccaoDestino: e.target.value})} disabled={userRole !== 'pcp'} />
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Prazo de Entrega (SLA) *</label>
@@ -965,69 +781,6 @@
                                     <button type="submit" form="opForm" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5">
                                         <i data-lucide="save" className="w-4 h-4"></i> Salvar Registro
                                     </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Modal Gerenciador de Fases */}
-                    {isManageColumnsOpen && (
-                        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 flex flex-col max-h-[90vh]">
-                                <div className="flex justify-between items-center border-b pb-3 mb-4">
-                                    <h3 className="font-bold text-slate-800 text-sm">Gerenciador de Fases do Kanban</h3>
-                                    <button onClick={() => setIsManageColumnsOpen(false)}><i data-lucide="x" className="w-5 h-5"></i></button>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1">
-                                    <div className="space-y-3">
-                                        <h4 className="text-xs font-bold text-slate-600 uppercase">Fases Atuais</h4>
-                                        {columns.map((col, idx) => (
-                                            <div key={col.id} className="p-3 border rounded-xl bg-slate-50 flex items-center justify-between gap-2">
-                                                <div className="flex-1">
-                                                    <p className="font-bold text-xs text-slate-800">{col.title}</p>
-                                                    <p className="text-[10px] text-slate-500">Setor: {col.sector}</p>
-                                                </div>
-                                                <div className="flex items-center gap-1">
-                                                    <button onClick={() => handleMoveColumn(idx, -1)} disabled={idx === 0} className="p-1 text-slate-600 disabled:opacity-30"><i data-lucide="arrow-left" className="w-4 h-4"></i></button>
-                                                    <button onClick={() => handleMoveColumn(idx, 1)} disabled={idx === columns.length - 1} className="p-1 text-slate-600 disabled:opacity-30"><i data-lucide="arrow-right" className="w-4 h-4"></i></button>
-                                                    <button onClick={() => handleStartEditColumn(col)} className="p-1 text-blue-600"><i data-lucide="edit-2" className="w-4 h-4"></i></button>
-                                                    <button onClick={() => handleDeleteColumn(col.id)} className="p-1 text-red-600"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    <form onSubmit={handleSavePhase} className="space-y-3 bg-slate-50 p-4 border rounded-xl">
-                                        <h4 className="text-xs font-bold text-indigo-700 uppercase">{editingColumn ? 'Editar Fase' : 'Criar Nova Fase'}</h4>
-                                        <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Título da Coluna *</label>
-                                            <input type="text" required placeholder="Ex: Qualidade" className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.title} onChange={e => setPhaseFormData({...phaseFormData, title: e.target.value})} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">ID do Status Interno *</label>
-                                            <input type="text" required placeholder="Ex: em_qualidade" className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.statusId} onChange={e => setPhaseFormData({...phaseFormData, statusId: e.target.value})} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Setor Responsável *</label>
-                                            <select className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.sector} onChange={e => setPhaseFormData({...phaseFormData, sector: e.target.value})}>
-                                                <option value="pcp">PCP</option>
-                                                <option value="almoxarifado">Almoxarifado</option>
-                                                <option value="distribuicao">Distribuição</option>
-                                                <option value="qualidade">Qualidade</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Senha de Liberação</label>
-                                            <input type="password" placeholder="Digite para alterar..." className="w-full p-2 border rounded-xl text-xs bg-white" value={phaseFormData.password} onChange={e => setPhaseFormData({...phaseFormData, password: e.target.value})} />
-                                        </div>
-                                        <div className="flex gap-2 pt-2">
-                                            {editingColumn && (
-                                                <button type="button" onClick={() => { setEditingColumn(null); setPhaseFormData({ title: '', sector: 'almoxarifado', statusId: '', color: 'border-indigo-300 bg-indigo-50/20', password: '' }); }} className="flex-1 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
-                                            )}
-                                            <button type="submit" className="flex-1 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs">{editingColumn ? 'Salvar Fase' : 'Adicionar Fase'}</button>
-                                        </div>
-                                    </form>
                                 </div>
                             </div>
                         </div>
