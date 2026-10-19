@@ -62,12 +62,11 @@
             { id: 'completo', label: 'Finalizado (Entregue)', sector: 'finalizado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', borderColor: 'border-emerald-500' }
         ];
 
-        // Mapeamento das colunas com suporte a todas as variações de status do banco
         const defaultColumnsConfig = [
-            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente', 'pcp', 'pendentes'], sector: 'pcp' },
-            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'], sector: 'almoxarifado' },
-            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao', 'distribuicao'], sector: 'distribuicao' },
-            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo', 'finalizado', 'entregue'], sector: 'finalizado' }
+            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusIds: ['pendente'], sector: 'pcp' },
+            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusIds: ['em_separacao', 'aguardando_compra', 'parcial'], sector: 'almoxarifado' },
+            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusIds: ['em_distribuicao'], sector: 'distribuicao' },
+            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusIds: ['completo'], sector: 'finalizado' }
         ];
 
         let db = null;
@@ -98,14 +97,16 @@
             return now > limit ? { status: 'late', text: 'Atrasado' } : { status: 'ok', text: 'No Prazo' };
         };
 
-        // Função de normalização para enquadrar status legados de forma garantida
-        const normalizeStatus = (rawStatus) => {
+        // Normalização rígida de status para evitar registros fantasma ou nulos
+        const getCleanStatus = (rawStatus) => {
             if (!rawStatus) return 'pendente';
-            const status = String(rawStatus).toLowerCase().trim();
-            if (['pendente', 'pcp', 'pendentes'].includes(status)) return 'pendente';
-            if (['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'].includes(status)) return status;
-            if (['em_distribuicao', 'distribuicao'].includes(status)) return 'em_distribuicao';
-            if (['completo', 'finalizado', 'entregue'].includes(status)) return 'completo';
+            const str = String(rawStatus).toLowerCase().trim();
+            if (['pendente', 'pcp', 'pendentes'].includes(str)) return 'pendente';
+            if (['em_separacao', 'separacao'].includes(str)) return 'em_separacao';
+            if (['aguardando_compra'].includes(str)) return 'aguardando_compra';
+            if (['parcial'].includes(str)) return 'parcial';
+            if (['em_distribuicao', 'distribuicao'].includes(str)) return 'em_distribuicao';
+            if (['completo', 'finalizado', 'entregue'].includes(str)) return 'completo';
             return 'pendente';
         };
 
@@ -122,11 +123,7 @@
                 const saved = localStorage.getItem('ops_columns_config');
                 if (!saved) return defaultColumnsConfig;
                 try {
-                    const parsed = JSON.parse(saved);
-                    return parsed.map(c => ({
-                        ...c,
-                        statusIds: c.statusIds || (c.statusId ? [c.statusId] : ['pendente'])
-                    }));
+                    return JSON.parse(saved);
                 } catch (e) {
                     return defaultColumnsConfig;
                 }
@@ -178,7 +175,13 @@
                 setDbStatus('conectando');
                 const unsubscribe = db.collection('ops_aviamentos').onSnapshot((snapshot) => {
                     const loadedOps = [];
-                    snapshot.forEach(doc => loadedOps.push({ id: doc.id, ...doc.data() }));
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        // Garante id único e elimina documentos sem opNumber
+                        if (data && (data.opNumber || data.model)) {
+                            loadedOps.push({ id: doc.id, ...data, status: getCleanStatus(data.status) });
+                        }
+                    });
                     setOps(loadedOps);
                     setDbStatus('online');
                     localStorage.setItem('ops_aviamentos_cache', JSON.stringify(loadedOps));
@@ -189,15 +192,20 @@
 
             const loadLocalData = () => {
                 const cached = localStorage.getItem('ops_aviamentos_cache');
-                if (cached) setOps(JSON.parse(cached));
+                if (cached) {
+                    try {
+                        setOps(JSON.parse(cached));
+                    } catch(e) {}
+                }
             };
 
             const saveOpToDb = (updatedOp) => {
+                const cleanOp = { ...updatedOp, status: getCleanStatus(updatedOp.status) };
                 if (dbStatus === 'online' && db) {
-                    db.collection('ops_aviamentos').doc(updatedOp.id).set(updatedOp)
-                        .catch(() => updateLocalState(updatedOp));
+                    db.collection('ops_aviamentos').doc(cleanOp.id).set(cleanOp)
+                        .catch(() => updateLocalState(cleanOp));
                 } else {
-                    updateLocalState(updatedOp);
+                    updateLocalState(cleanOp);
                 }
             };
 
@@ -229,7 +237,7 @@
 
                 const dataToExport = ops.map(op => {
                     const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                    const isFinalizada = normalizeStatus(op.status) === 'completo';
+                    const isFinalizada = getCleanStatus(op.status) === 'completo';
                     return {
                         "Número OP": op.opNumber || '',
                         "Modelo / Referência": op.model || '',
@@ -253,7 +261,7 @@
 
             // BACKUP JSON GERAL
             const handleExportBackupJSON = () => {
-                const backupPayload = { version: "2.4", columns, passwords, ops };
+                const backupPayload = { version: "2.5", columns, passwords, ops };
                 const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -374,7 +382,7 @@
                         opNumber: op.opNumber || '',
                         model: op.model || '',
                         faccaoDestino: op.faccaoDestino || '',
-                        status: normalizeStatus(op.status),
+                        status: getCleanStatus(op.status),
                         notes: op.notes || '',
                         slaDeadline: op.slaDeadline ? op.slaDeadline.slice(0, 16) : getSuggestedSla(),
                         isPriority: op.isPriority || false,
@@ -517,10 +525,10 @@
             };
 
             const executeSaveOp = (opToSave) => {
-                let finalOp = { ...opToSave };
-                if (normalizeStatus(opToSave.status) === 'completo' && !opToSave.completedTime) {
+                let finalOp = { ...opToSave, status: getCleanStatus(opToSave.status) };
+                if (finalOp.status === 'completo' && !finalOp.completedTime) {
                     finalOp.completedTime = new Date().toISOString();
-                } else if (normalizeStatus(opToSave.status) !== 'completo') {
+                } else if (finalOp.status !== 'completo') {
                     finalOp.completedTime = null;
                 }
                 saveOpToDb(finalOp);
@@ -549,7 +557,7 @@
             };
 
             const isCompletedAndOld = (op) => {
-                if (normalizeStatus(op.status) !== 'completo' || !op.completedTime) return false;
+                if (getCleanStatus(op.status) !== 'completo' || !op.completedTime) return false;
                 return (new Date().getTime() - new Date(op.completedTime).getTime()) / (1000 * 60 * 60) >= 24; 
             };
 
@@ -560,7 +568,7 @@
                 (op.faccaoDestino || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
 
-            const allCompletedOps = ops.filter(op => normalizeStatus(op.status) === 'completo');
+            const allCompletedOps = ops.filter(op => getCleanStatus(op.status) === 'completo');
 
             const filteredHistoryOps = allCompletedOps.filter(op => {
                 const matchesSearch = 
@@ -580,18 +588,18 @@
                 return true;
             }).sort((a, b) => new Date(b.completedTime || 0) - new Date(a.completedTime || 0));
 
-            // KPIs - Contagem exata conforme solicitado
-            const totalOpsAtivas = visibleOps.filter(op => normalizeStatus(op.status) !== 'completo').length;
-            const inSeparacaoOps = visibleOps.filter(op => ['em_separacao', 'separacao', 'aguardando_compra', 'parcial', 'almoxarifado'].includes(normalizeStatus(op.status))).length;
-            const inDistribuicaoOps = visibleOps.filter(op => normalizeStatus(op.status) === 'em_distribuicao').length;
-            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && normalizeStatus(op.status) !== 'completo').length;
-            const completedOpsCount = visibleOps.filter(op => normalizeStatus(op.status) === 'completo').length;
+            // KPIs Fidedignos
+            const totalOpsAtivas = visibleOps.filter(op => getCleanStatus(op.status) !== 'completo').length;
+            const inSeparacaoOps = visibleOps.filter(op => ['em_separacao', 'aguardando_compra', 'parcial'].includes(getCleanStatus(op.status))).length;
+            const inDistribuicaoOps = visibleOps.filter(op => getCleanStatus(op.status) === 'em_distribuicao').length;
+            const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && getCleanStatus(op.status) !== 'completo').length;
+            const completedOpsCount = visibleOps.filter(op => getCleanStatus(op.status) === 'completo').length;
 
             const renderCard = (op) => {
-                const normalizedStat = normalizeStatus(op.status);
+                const cleanStat = getCleanStatus(op.status);
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
-                const isLate = sla.status === 'late' && normalizedStat !== 'completo';
-                const currentStatusObj = statusOptions.find(s => s.id === normalizedStat) || statusOptions[0];
+                const isLate = sla.status === 'late' && cleanStat !== 'completo';
+                const currentStatusObj = statusOptions.find(s => s.id === cleanStat) || statusOptions[0];
 
                 return (
                     <div 
@@ -614,7 +622,7 @@
                             </div>
                             
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : normalizedStat === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
+                                isLate ? 'bg-red-100 text-red-700 animate-pulse' : cleanStat === 'completo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
                             }`}>
                                 {sla.text}
                             </span>
@@ -722,7 +730,7 @@
                         </div>
                     </header>
 
-                    {/* Resumo/KPIs do Topo - Exatamente como na Imagem 2 */}
+                    {/* Resumo/KPIs do Topo - Imagem 2 */}
                     <main className="flex-1 p-6 flex flex-col">
                         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                             <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
@@ -747,12 +755,12 @@
                             </div>
                         </div>
 
-                        {/* Kanban */}
+                        {/* Kanban Filtro por Pertencimento Único */}
                         <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
                                 {columns.map((col) => {
                                     const colOps = filteredOps
-                                        .filter(op => (col.statusIds || []).includes(normalizeStatus(op.status)))
+                                        .filter(op => (col.statusIds || []).includes(getCleanStatus(op.status)))
                                         .sort((a, b) => {
                                             if (a.isPriority && !b.isPriority) return -1;
                                             if (!a.isPriority && b.isPriority) return 1;
@@ -780,7 +788,7 @@
                         </div>
                     </main>
 
-                    {/* Modal Detalhes/Edição da OP - Idêntico à Imagem 1 */}
+                    {/* Modal Detalhes/Edição da OP - Imagem 1 */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -818,7 +826,7 @@
                                                 <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> AVANCE A FASE DA OP
                                             </h4>
                                             
-                                            {normalizeStatus(editingOp.status) !== 'em_distribuicao' && normalizeStatus(editingOp.status) !== 'completo' && (
+                                            {getCleanStatus(editingOp.status) !== 'em_distribuicao' && getCleanStatus(editingOp.status) !== 'completo' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50/80 p-3 rounded-lg border border-blue-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-blue-900">Confirmar Separação dos Aviamentos</p>
@@ -830,7 +838,7 @@
                                                 </div>
                                             )}
 
-                                            {normalizeStatus(editingOp.status) === 'em_distribuicao' && (
+                                            {getCleanStatus(editingOp.status) === 'em_distribuicao' && (
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50/80 p-3 rounded-lg border border-purple-200 gap-2">
                                                     <div>
                                                         <p className="text-xs font-bold text-purple-900">Confirmar Entrega / Distribuição Concluída</p>
