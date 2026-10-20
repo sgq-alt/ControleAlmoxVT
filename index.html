@@ -53,20 +53,11 @@
             measurementId: "G-CJRY2BQWRH"
         };
 
-        const statusOptions = [
-            { id: 'pendente', label: 'Pendente (PCP)', sector: 'pcp', color: 'bg-red-100 text-red-800 border-red-200', borderColor: 'border-red-500' },
-            { id: 'em_separacao', label: 'Em Separação', sector: 'almoxarifado', color: 'bg-orange-100 text-orange-800 border-orange-200', borderColor: 'border-orange-500' },
-            { id: 'aguardando_compra', label: 'Aguardando Compra', sector: 'almoxarifado', color: 'bg-pink-100 text-pink-800 border-pink-200', borderColor: 'border-pink-600' },
-            { id: 'parcial', label: 'Parcial (Faltam Itens)', sector: 'almoxarifado', color: 'bg-blue-100 text-blue-800 border-blue-200', borderColor: 'border-blue-500' },
-            { id: 'em_distribuicao', label: 'Em Distribuição', sector: 'distribuicao', color: 'bg-purple-100 text-purple-800 border-purple-200', borderColor: 'border-purple-500' },
-            { id: 'completo', label: 'Finalizado (Entregue)', sector: 'finalizado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', borderColor: 'border-emerald-500' }
-        ];
-
         const defaultColumnsConfig = [
-            { id: 'pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statuses: ['pendente'] },
-            { id: 'almoxarifado', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statuses: ['em_separacao', 'aguardando_compra', 'parcial'] },
-            { id: 'distribuicao', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statuses: ['em_distribuicao'] },
-            { id: 'finalizado', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statuses: ['completo'] }
+            { id: 'col_pcp', title: '1. Pendentes/Almoxarifado', color: 'border-slate-300 bg-slate-50', badgeColor: 'bg-slate-200 text-slate-700', statusKey: 'pendente', sector: 'pcp' },
+            { id: 'col_almox', title: '2. Em separação ou Incompletos', color: 'border-blue-300 bg-blue-50/20', badgeColor: 'bg-blue-100 text-blue-800', statusKey: 'em_separacao', sector: 'almoxarifado' },
+            { id: 'col_dist', title: '3. Distribuição', color: 'border-purple-300 bg-purple-50/20', badgeColor: 'bg-purple-100 text-purple-800', statusKey: 'em_distribuicao', sector: 'distribuicao' },
+            { id: 'col_final', title: '4. Finalizados', color: 'border-emerald-300 bg-emerald-50/20', badgeColor: 'bg-emerald-100 text-emerald-800', statusKey: 'completo', sector: 'finalizado' }
         ];
 
         let db = null;
@@ -106,9 +97,9 @@
             const [dbStatus, setDbStatus] = useState('conectando');
             const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-            // Colunas Seguras
+            // Colunas
             const [columns, setColumns] = useState(() => {
-                const saved = localStorage.getItem('ops_columns_config_safe');
+                const saved = localStorage.getItem('ops_columns_config_v3');
                 return saved ? JSON.parse(saved) : defaultColumnsConfig;
             });
 
@@ -135,10 +126,8 @@
 
             const [newChecklistItem, setNewChecklistItem] = useState('');
 
-            // Formulário de Nova Fase/Coluna
-            const [newPhaseData, setNewPhaseData] = useState({
-                title: '', sector: 'almoxarifado', mapToStatus: 'em_separacao'
-            });
+            // Formulário de Nova Fase Independente
+            const [newPhaseData, setNewPhaseData] = useState({ title: '', sector: 'almoxarifado' });
 
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
@@ -204,7 +193,7 @@
             // EXPORTAR EXCEL
             const handleExportToExcel = () => {
                 if (typeof XLSX === 'undefined') {
-                    alert("Aguarde o carregamento da ferramenta do Excel.");
+                    alert("Aguarde o carregamento do módulo do Excel.");
                     return;
                 }
 
@@ -232,24 +221,52 @@
                 XLSX.writeFile(workbook, `Relatorio_OPs_Aviamentos_${new Date().toISOString().slice(0, 10)}.xlsx`);
             };
 
-            // GERENCIAMENTO SEGURO DE FASES
+            // GESTÃO 100% INDEPENDENTE DE COLUNAS
             const handleAddCustomPhase = (e) => {
                 e.preventDefault();
-                if (!newPhaseData.title) return;
+                if (!newPhaseData.title.trim()) return;
+
+                const statusKeyClean = `fase_${Date.now()}`;
 
                 const newCol = {
-                    id: `custom_${Date.now()}`,
-                    title: newPhaseData.title,
+                    id: `col_${Date.now()}`,
+                    title: newPhaseData.title.trim(),
                     color: 'border-indigo-300 bg-indigo-50/20',
                     badgeColor: 'bg-indigo-100 text-indigo-800',
-                    statuses: [newPhaseData.mapToStatus]
+                    statusKey: statusKeyClean,
+                    sector: newPhaseData.sector
                 };
 
-                const updatedCols = [...columns, newCol];
+                const updatedCols = [...columns];
+                // Insere a nova coluna antes da coluna Finalizados
+                const finalIdx = updatedCols.findIndex(c => c.statusKey === 'completo');
+                if (finalIdx !== -1) {
+                    updatedCols.splice(finalIdx, 0, newCol);
+                } else {
+                    updatedCols.push(newCol);
+                }
+
                 setColumns(updatedCols);
-                localStorage.setItem('ops_columns_config_safe', JSON.stringify(updatedCols));
-                setNewPhaseData({ title: '', sector: 'almoxarifado', mapToStatus: 'em_separacao' });
-                alert("Nova coluna configurada com sucesso!");
+                localStorage.setItem('ops_columns_config_v3', JSON.stringify(updatedCols));
+                setNewPhaseData({ title: '', sector: 'almoxarifado' });
+                alert("Nova coluna independente criada com sucesso!");
+            };
+
+            const handleDeleteCustomColumn = (colId, statusKey) => {
+                if (['pendente', 'em_separacao', 'em_distribuicao', 'completo'].includes(statusKey)) {
+                    alert("Esta é uma coluna padrão do sistema e não pode ser excluída.");
+                    return;
+                }
+                if (confirm("Deseja excluir esta coluna? As OPs dentro dela retornarão para 'Em Separação'.")) {
+                    // Mover OPs que estavam nessa coluna de volta para 'em_separacao'
+                    ops.filter(o => o.status === statusKey).forEach(op => {
+                        saveOpToDb({ ...op, status: 'em_separacao' });
+                    });
+
+                    const updatedCols = columns.filter(c => c.id !== colId);
+                    setColumns(updatedCols);
+                    localStorage.setItem('ops_columns_config_v3', JSON.stringify(updatedCols));
+                }
             };
 
             const handleMoveColumnPosition = (index, direction) => {
@@ -262,13 +279,13 @@
                 updated[target] = temp;
 
                 setColumns(updated);
-                localStorage.setItem('ops_columns_config_safe', JSON.stringify(updated));
+                localStorage.setItem('ops_columns_config_v3', JSON.stringify(updated));
             };
 
             const handleResetColumns = () => {
-                if (confirm("Restaurar a visualização padrão das 4 colunas originais?")) {
+                if (confirm("Restaurar para as 4 colunas padrão originais?")) {
                     setColumns(defaultColumnsConfig);
-                    localStorage.removeItem('ops_columns_config_safe');
+                    localStorage.removeItem('ops_columns_config_v3');
                 }
             };
 
@@ -328,7 +345,7 @@
             const handleVerifyPassword = (e) => {
                 e.preventDefault();
                 const requiredRole = passwordModal.requiredRole;
-                const correctPassword = passwords[requiredRole];
+                const correctPassword = passwords[requiredRole] || '123456';
 
                 if (passwordModal.password !== correctPassword) {
                     setPasswordModal(prev => ({ ...prev, error: `Senha do setor incorreta!` }));
@@ -343,8 +360,7 @@
                 if (action === 'delete') executeDeleteOp(data.id);
                 else if (action === 'allow_edit') { setEditingOp(data); handleOpenModal(data); }
                 else if (action === 'save_edit') executeSaveOp(data);
-                else if (action === 'confirm_separacao') executeMoveToDistribicao(data);
-                else if (action === 'confirm_distribuicao') executeMoveToFinalizados(data);
+                else if (action === 'move_to_next') executeMoveToNextColumn(data.op, data.nextStatus);
             };
 
             const executeDeleteOp = (opId) => {
@@ -358,14 +374,14 @@
                 }
             };
 
-            const executeMoveToDistribicao = (opToMove) => {
-                const updatedOp = { ...opToMove, status: 'em_distribuicao', separationConfirmedAt: new Date().toISOString() };
-                saveOpToDb(updatedOp);
-                handleCloseModal();
-            };
-
-            const executeMoveToFinalizados = (opToMove) => {
-                const updatedOp = { ...opToMove, status: 'completo', completedTime: new Date().toISOString() };
+            const executeMoveToNextColumn = (opToMove, nextStatusKey) => {
+                const isFinal = nextStatusKey === 'completo';
+                const updatedOp = { 
+                    ...opToMove, 
+                    status: nextStatusKey,
+                    completedTime: isFinal ? new Date().toISOString() : null,
+                    separationConfirmedAt: nextStatusKey === 'em_distribuicao' ? new Date().toISOString() : opToMove.separationConfirmedAt
+                };
                 saveOpToDb(updatedOp);
                 handleCloseModal();
             };
@@ -466,20 +482,29 @@
             const totalOps = visibleOps.length;
             const completedOps = visibleOps.filter(op => op.status === 'completo').length;
             const inDistribuicaoOps = visibleOps.filter(op => op.status === 'em_distribuicao').length;
-            const pendingOps = totalOps - completedOps;
+            const pendingOps = visibleOps.filter(op => op.status === 'em_separacao' || op.status === 'pendente').length;
             const lateOps = visibleOps.filter(op => calculateSlaStatus(op.slaDeadline, op.completedTime).status === 'late' && op.status !== 'completo').length;
+
+            // Busca próxima coluna sequencial
+            const getNextColumnInfo = (currentStatus) => {
+                const idx = columns.findIndex(c => c.statusKey === currentStatus);
+                if (idx !== -1 && idx < columns.length - 1) {
+                    return columns[idx + 1];
+                }
+                return null;
+            };
 
             const renderCard = (op) => {
                 const sla = calculateSlaStatus(op.slaDeadline, op.completedTime);
                 const isLate = sla.status === 'late' && op.status !== 'completo';
-                const currentStatusObj = statusOptions.find(s => s.id === op.status) || statusOptions[0];
+                const colObj = columns.find(c => c.statusKey === op.status);
 
                 return (
                     <div 
                         key={op.id} 
                         onClick={() => handleOpenModal(op)}
-                        className={`bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border-2 relative overflow-hidden mb-3 ${currentStatusObj.borderColor} ${
-                            op.isPriority ? 'bg-gradient-to-br from-amber-50/30 to-white shadow-amber-100/50' : ''
+                        className={`bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border-2 relative overflow-hidden mb-3 border-slate-200 ${
+                            op.isPriority ? 'bg-gradient-to-br from-amber-50/30 to-white shadow-amber-100/50 border-amber-300' : ''
                         }`}
                     >
                         {op.isPriority && <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400"></div>}
@@ -502,8 +527,8 @@
                         </div>
 
                         <div className="mb-2">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border inline-block ${currentStatusObj.color}`}>
-                                {currentStatusObj.label}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border bg-slate-100 text-slate-700 border-slate-200 inline-block">
+                                {colObj ? colObj.title : op.status}
                             </span>
                         </div>
                         
@@ -603,7 +628,7 @@
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-yellow-50 rounded-xl text-yellow-600"><i data-lucide="timer" className="w-5 h-5"></i></div>
-                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Em Separação</p><p className="text-xl font-extrabold text-slate-800">{pendingOps - inDistribuicaoOps}</p></div>
+                                <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Em Separação</p><p className="text-xl font-extrabold text-slate-800">{pendingOps}</p></div>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-purple-50 rounded-xl text-purple-600"><i data-lucide="truck" className="w-5 h-5"></i></div>
@@ -624,7 +649,7 @@
                             <div className="flex gap-6 h-full items-start min-w-[1280px]">
                                 {columns.map(col => {
                                     const colOps = filteredOps
-                                        .filter(op => (col.statuses || []).includes(op.status))
+                                        .filter(op => op.status === col.statusKey)
                                         .sort((a, b) => {
                                             if (a.isPriority && !b.isPriority) return -1;
                                             if (!a.isPriority && b.isPriority) return 1;
@@ -681,38 +706,35 @@
                                         </div>
                                     )}
 
-                                    {/* Ações Específicas de Transição */}
-                                    {editingOp && (
-                                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                                <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> AVANCE A FASE DA OP
-                                            </h4>
-                                            
-                                            {editingOp.status !== 'em_distribuicao' && editingOp.status !== 'completo' && (
+                                    {/* Ações Inteligentes de Transição Entre Colunas */}
+                                    {editingOp && editingOp.status !== 'completo' && (() => {
+                                        const nextCol = getNextColumnInfo(editingOp.status);
+                                        if (!nextCol) return null;
+                                        
+                                        const requiredSector = nextCol.sector || 'almoxarifado';
+                                        
+                                        return (
+                                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                                                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                                    <i data-lucide="git-commit" className="w-4 h-4 text-blue-600"></i> AVANCE A FASE DA OP
+                                                </h4>
+                                                
                                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50/80 p-3 rounded-lg border border-blue-200 gap-2">
                                                     <div>
-                                                        <p className="text-xs font-bold text-blue-900">Confirmar Separação dos Aviamentos</p>
-                                                        <p className="text-[11px] text-blue-700">Conclui a separação no Almoxarifado e envia para a fila de Distribuição.</p>
+                                                        <p className="text-xs font-bold text-blue-900">Avançar para: {nextCol.title}</p>
+                                                        <p className="text-[11px] text-blue-700">Move a OP para a próxima fase no fluxo produtivo.</p>
                                                     </div>
-                                                    <button type="button" onClick={() => triggerPasswordCheck('almoxarifado', 'confirm_separacao', editingOp)} className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap">
-                                                        <i data-lucide="shield-check" className="w-4 h-4"></i> Confirmar Separação (Senha Almoxarifado)
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => triggerPasswordCheck(requiredSector, 'move_to_next', { op: editingOp, nextStatus: nextCol.statusKey })} 
+                                                        className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap"
+                                                    >
+                                                        <i data-lucide="arrow-right-circle" className="w-4 h-4"></i> Avançar Fase (Senha {requiredSector.toUpperCase()})
                                                     </button>
                                                 </div>
-                                            )}
-
-                                            {editingOp.status === 'em_distribuicao' && (
-                                                <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50/80 p-3 rounded-lg border border-purple-200 gap-2">
-                                                    <div>
-                                                        <p className="text-xs font-bold text-purple-900">Confirmar Entrega / Distribuição Concluída</p>
-                                                        <p className="text-[11px] text-purple-700">A OP foi entregue à facção/oficina de destino e será movida para Finalizados.</p>
-                                                    </div>
-                                                    <button type="button" onClick={() => triggerPasswordCheck('distribuicao', 'confirm_distribuicao', editingOp)} className="w-full sm:w-auto px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap">
-                                                        <i data-lucide="check-circle" className="w-4 h-4"></i> Finalizar Distribuição (Senha Distribuição)
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                                            </div>
+                                        );
+                                    })()}
 
                                     <form id="opForm" onSubmit={handleSaveOp} className="space-y-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -774,13 +796,13 @@
                                         {editingOp && (
                                             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
                                                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
-                                                    <i data-lucide="sliders" className="w-4 h-4"></i> STATUS INTERNO E OCORRÊNCIAS
+                                                    <i data-lucide="sliders" className="w-4 h-4"></i> FASE ATUAL DA OP
                                                 </h4>
                                                 
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">STATUS INTERNO</label>
-                                                    <select className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                                                        {statusOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">COLUNA / STATUS ATUAL</label>
+                                                    <select className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                                                        {columns.map(c => <option key={c.statusKey} value={c.statusKey}>{c.title}</option>)}
                                                     </select>
                                                 </div>
 
@@ -832,29 +854,37 @@
                         </div>
                     )}
 
-                    {/* Modal Gerenciador Seguro de Colunas */}
+                    {/* Modal Gerenciador de Colunas Independente */}
                     {isManageColumnsOpen && (
                         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 flex flex-col">
                                 <div className="flex justify-between items-center border-b pb-3 mb-4">
-                                    <h3 className="font-bold text-slate-800 text-sm">Personalizador Visual do Kanban</h3>
+                                    <h3 className="font-bold text-slate-800 text-sm">Gerenciador de Colunas do Kanban</h3>
                                     <button onClick={() => setIsManageColumnsOpen(false)}><i data-lucide="x" className="w-5 h-5"></i></button>
                                 </div>
 
                                 <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-1 custom-scrollbar">
                                     <div>
-                                        <h4 className="text-xs font-bold text-slate-600 uppercase mb-2">Reordenar Colunas do Kanban</h4>
+                                        <h4 className="text-xs font-bold text-slate-600 uppercase mb-2">Colunas Atuais do Fluxo</h4>
                                         <div className="space-y-2">
                                             {columns.map((col, idx) => (
                                                 <div key={col.id} className="p-3 border rounded-xl bg-slate-50 flex items-center justify-between">
-                                                    <span className="font-bold text-xs text-slate-800">{col.title}</span>
-                                                    <div className="flex gap-1">
+                                                    <div>
+                                                        <p className="font-bold text-xs text-slate-800">{col.title}</p>
+                                                        <p className="text-[10px] text-slate-400">Setor: {col.sector || 'Geral'}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
                                                         <button onClick={() => handleMoveColumnPosition(idx, -1)} disabled={idx === 0} className="p-1 bg-white border rounded text-xs disabled:opacity-30">
                                                             <i data-lucide="arrow-left" className="w-3.5 h-3.5"></i>
                                                         </button>
                                                         <button onClick={() => handleMoveColumnPosition(idx, 1)} disabled={idx === columns.length - 1} className="p-1 bg-white border rounded text-xs disabled:opacity-30">
                                                             <i data-lucide="arrow-right" className="w-3.5 h-3.5"></i>
                                                         </button>
+                                                        {!['pendente', 'em_separacao', 'em_distribuicao', 'completo'].includes(col.statusKey) && (
+                                                            <button onClick={() => handleDeleteCustomColumn(col.id, col.statusKey)} className="p-1 bg-red-50 text-red-600 border border-red-200 rounded text-xs">
+                                                                <i data-lucide="trash-2" className="w-3.5 h-3.5"></i>
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ))}
@@ -862,28 +892,27 @@
                                     </div>
 
                                     <form onSubmit={handleAddCustomPhase} className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-3">
-                                        <h4 className="text-xs font-bold text-indigo-900 uppercase">Adicionar Nova Coluna Visual</h4>
+                                        <h4 className="text-xs font-bold text-indigo-900 uppercase">Criar Nova Coluna 100% Independente</h4>
                                         <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Nome da Coluna *</label>
-                                            <input type="text" required placeholder="Ex: Fila de Espera" className="w-full p-2 border rounded-lg text-xs bg-white" value={newPhaseData.title} onChange={e => setNewPhaseData({...newPhaseData, title: e.target.value})} />
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Nome da Nova Coluna *</label>
+                                            <input type="text" required placeholder="Ex: Aguardando Tecido, Qualidade, Rota..." className="w-full p-2 border rounded-lg text-xs bg-white" value={newPhaseData.title} onChange={e => setNewPhaseData({...newPhaseData, title: e.target.value})} />
                                         </div>
                                         <div>
-                                            <label className="text-xs font-bold text-slate-600 block mb-1">Agrupar OPs do Status *</label>
-                                            <select className="w-full p-2 border rounded-lg text-xs bg-white font-semibold" value={newPhaseData.mapToStatus} onChange={e => setNewPhaseData({...newPhaseData, mapToStatus: e.target.value})}>
-                                                <option value="pendente">1. Pendente (PCP)</option>
-                                                <option value="em_separacao">2. Em Separação (Almoxarifado)</option>
-                                                <option value="em_distribuicao">3. Em Distribuição</option>
-                                                <option value="completo">4. Finalizado</option>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Setor Responsável *</label>
+                                            <select className="w-full p-2 border rounded-lg text-xs bg-white font-semibold" value={newPhaseData.sector} onChange={e => setNewPhaseData({...newPhaseData, sector: e.target.value})}>
+                                                <option value="pcp">PCP</option>
+                                                <option value="almoxarifado">Almoxarifado</option>
+                                                <option value="distribuicao">Distribuição</option>
                                             </select>
                                         </div>
-                                        <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded-lg text-xs shadow-sm hover:bg-indigo-700">
-                                            Adicionar Coluna
+                                        <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded-lg text-xs shadow-sm hover:bg-indigo-700 flex items-center justify-center gap-1">
+                                            <i data-lucide="plus-circle" className="w-4 h-4"></i> Adicionar Nova Coluna
                                         </button>
                                     </form>
 
                                     <div className="pt-2 border-t text-center">
                                         <button type="button" onClick={handleResetColumns} className="text-xs text-red-600 font-bold hover:underline">
-                                            Restaurar Layout Original das 4 Colunas
+                                            Restaurar Colunas Originais
                                         </button>
                                     </div>
                                 </div>
